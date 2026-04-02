@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - namespaces/namespace.yaml
   - api-gateway
+  - notification-service
   - patient-service
   - doctor-service
   - appointment-service
