@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: distributed-health
+data:
+  PORT: "3001"
+  PATIENT_SERVICE_URL: "http://patient-service:3002"
+  DOCTOR_SERVICE_URL: "http://doctor-service:3003"
+  APPOINTMENT_SERVICE_URL: "http://appointment-service:3004"
+  TELEMEDICINE_SERVICE_URL: "http://telemedicine-service:3006"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3007"
