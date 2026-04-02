@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: doctor-service-config
+  namespace: distributed-health
+data:
+  PORT: "3003"
