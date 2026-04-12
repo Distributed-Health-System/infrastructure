@@ -7,3 +7,4 @@ resources:
   - patient-service
   - doctor-service
   - appointment-service
+  - telemedicine-service

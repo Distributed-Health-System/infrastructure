@@ -1,33 +1,33 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: appointment-service
+  name: telemedicine-service
   namespace: distributed-health
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: appointment-service
+      app: telemedicine-service
   template:
     metadata:
       labels:
-        app: appointment-service
+        app: telemedicine-service
     spec:
       containers:
-        - name: appointment-service
-          image: amzalfoumi/appointment-service:latest
+        - name: telemedicine-service
+          image: amzalfoumi/telemedicine-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 3004
+            - containerPort: 3006
           env:
             - name: MONGODB_URI
               valueFrom:
                 secretKeyRef:
-                  name: appointment-service-secret
+                  name: telemedicine-service-secret
                   key: MONGODB_URI
           envFrom:
             - configMapRef:
-                name: appointment-service-config
+                name: telemedicine-service-config
           resources:
             requests:
               cpu: 100m
