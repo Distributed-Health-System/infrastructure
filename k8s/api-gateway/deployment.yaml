@@ -20,6 +20,9 @@ spec:
           ports:
             - containerPort: 3001
           envFrom:
+            - secretRef:
+                name: api-gateway-secret
+                optional: true
             - configMapRef:
                 name: api-gateway-config
           resources:

@@ -6,7 +6,3 @@ resources:
   - deployment.yaml
   - service.yaml
 
-secretGenerator:
-  - name: telemedicine-service-secret
-    envs:
-      - .env.secret

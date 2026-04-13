@@ -25,3 +25,4 @@ lerna-debug.log*
 
 # Kubernetes local secrets
 **/*.env.secret
+setup-secrets.sh

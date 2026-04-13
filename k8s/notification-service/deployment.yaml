@@ -20,6 +20,9 @@ spec:
           ports:
             - containerPort: 3007
           envFrom:
+            - secretRef:
+                name: notification-service-secret
+                optional: true
             - configMapRef:
                 name: notification-service-config
           resources:

@@ -19,13 +19,10 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3006
-          env:
-            - name: MONGODB_URI
-              valueFrom:
-                secretKeyRef:
-                  name: telemedicine-service-secret
-                  key: MONGODB_URI
           envFrom:
+            - secretRef:
+                name: telemedicine-service-secret
+                optional: true
             - configMapRef:
                 name: telemedicine-service-config
           resources:
