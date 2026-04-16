@@ -8,3 +8,5 @@ resources:
   - doctor-service
   - appointment-service
   - telemedicine-service
+  - payment-service
+  - ai-service
