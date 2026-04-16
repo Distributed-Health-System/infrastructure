@@ -6,3 +6,9 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
+
+images:
+  - name: amzalfoumi/api-gateway
+    newName: amzalfoumi/api-gateway
+    newTag: ff4fc11
+
