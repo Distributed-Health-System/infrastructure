@@ -5,3 +5,6 @@ metadata:
   namespace: distributed-health
 data:
   PORT: "3004"
+  TELEMEDICINE_SERVICE_URL: "http://telemedicine-service:3005"
+  PAYMENT_SERVICE_URL: "http://payment-service:3006"
+  DOCTOR_SERVICE_URL: "http://doctor-service:3003"
