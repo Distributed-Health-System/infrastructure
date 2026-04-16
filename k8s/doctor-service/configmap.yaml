@@ -5,3 +5,5 @@ metadata:
   namespace: distributed-health
 data:
   PORT: "3003"
+  APPOINTMENT_SLOT_STEP_MINUTES: "30"
+
