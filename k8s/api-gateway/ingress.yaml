@@ -4,9 +4,6 @@ metadata:
   name: api-gateway-ingress
   namespace: distributed-health
   annotations:
-    # Use the NGINX controller we just enabled
-    kubernetes.io/ingress.class: nginx
-
     # Enable CORS in NGINX
     nginx.ingress.kubernetes.io/enable-cors: "true"
     # Allow your Vercel frontend and local React/Next app
@@ -18,6 +15,7 @@ metadata:
     # Allow credentials/cookies if you are using them
     nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
 spec:
+  ingressClassName: nginx
   rules:
     - http:
         paths:
