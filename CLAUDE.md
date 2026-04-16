@@ -115,7 +115,7 @@ Add each new service as a sibling folder under `k8s/` following the same structu
 
 ## Deployment Rules
 
-1. **Always set `imagePullPolicy: Never`** for minikube. Without it K8s will try to pull from Docker Hub and fail.
+1. **Always set `imagePullPolicy: IfNotPresent`** for minikube when images are built and pushed by GitHub Actions.
 
 2. **Always include resource requests and limits.** Never omit them.
 
@@ -150,7 +150,7 @@ Add each new service as a sibling folder under `k8s/` following the same structu
 
 5. **`replicas: 1` is fine for local dev.** Do not set it higher unless testing scaling behaviour.
 
-6. **Never use `latest` tag in production.** For minikube local dev it is acceptable since `imagePullPolicy: Never` is set. When moving to a real cluster, switch to explicit versioned tags like `api-gateway:1.0.0`.
+6. **Never use `latest` tag in production.** For minikube local dev it is acceptable when `imagePullPolicy: IfNotPresent` is set and the image has been built and pushed. When moving to a real cluster, switch to explicit versioned tags like `api-gateway:1.0.0`.
 
 ---
 
@@ -229,7 +229,7 @@ docker build -t api-gateway:latest ../api-gateway
 - [ ] No `../` references inside a service-level `kustomization.yaml`
 - [ ] New service added to root `k8s/kustomization.yaml`
 - [ ] Resource requests and limits present in every deployment
-- [ ] `imagePullPolicy: Never` set in every deployment
+- [ ] `imagePullPolicy: IfNotPresent` set in every deployment
 - [ ] `namespace: distributed-health` set in service-level kustomization
 - [ ] Labels are consistent across Deployment selector, Pod template, and Service selector
 - [ ] Sensitive values are in Secrets, not ConfigMaps

@@ -5,6 +5,9 @@ metadata:
   namespace: distributed-health
 data:
   PORT: "3001"
+  AUTHENTICATION_SERVICE_URL: "http://keycloak:8080"
+  KEYCLOAK_URL: "http://keycloak:8080"
+  KEYCLOAK_REALM: "health-system"
   PATIENT_SERVICE_URL: "http://patient-service:3002"
   DOCTOR_SERVICE_URL: "http://doctor-service:3003"
   APPOINTMENT_SERVICE_URL: "http://appointment-service:3004"

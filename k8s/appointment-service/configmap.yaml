@@ -5,6 +5,11 @@ metadata:
   namespace: distributed-health
 data:
   PORT: "3004"
+  AUTHENTICATION_SERVICE_URL: "http://keycloak:8080"
+  PATIENT_SERVICE_URL: "http://patient-service:3002"
+  DOCTOR_SERVICE_URL: "http://doctor-service:3003"
+  APPOINTMENT_SERVICE_URL: "http://appointment-service:3004"
   TELEMEDICINE_SERVICE_URL: "http://telemedicine-service:3006"
   PAYMENT_SERVICE_URL: "http://payment-service:3005"
-  DOCTOR_SERVICE_URL: "http://doctor-service:3003"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3007"
+  AI_SERVICE_URL: "http://ai-service:3008"

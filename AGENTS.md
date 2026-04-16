@@ -106,7 +106,7 @@ resources:
 
 ### deployment.yaml — required fields
 
-- `imagePullPolicy: Never` — always, for minikube
+- `imagePullPolicy: IfNotPresent` — always, for GitHub Actions-built images used with minikube
 - `resources.requests` and `resources.limits` — always, never omit
 - `envFrom.configMapRef` — inject config from ConfigMap, do not hardcode env vars inline
 - Labels must match exactly across `spec.selector.matchLabels`, `template.metadata.labels`, and the Service selector
@@ -143,7 +143,7 @@ Before generating any manifest file, verify:
 - [ ] All indentation uses spaces, not tabs
 - [ ] No `../` in service-level kustomization files
 - [ ] Root `k8s/kustomization.yaml` updated if a new service was added
-- [ ] `imagePullPolicy: Never` in every deployment
+- [ ] `imagePullPolicy: IfNotPresent` in every deployment
 - [ ] Resource requests and limits in every deployment
 - [ ] Labels consistent across Deployment, Pod template, and Service
 - [ ] ConfigMap values are quoted strings
