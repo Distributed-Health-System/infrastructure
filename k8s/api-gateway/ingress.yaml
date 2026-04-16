@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-gateway-ingress
+  namespace: distributed-health
+  annotations:
+    # Enable CORS in NGINX
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    # Allow your Vercel frontend and local React/Next app
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://frontend.example.com, http://localhost:3000"
+    # Allow standard HTTP methods plus OPTIONS for preflight
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
+    # MUST explicitly allow standard headers AND the custom ngrok header
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,ngrok-skip-browser-warning"
+    # Allow credentials/cookies if you are using them
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          # A single route: Catch ALL traffic and send it to the API Gateway
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway # Must match the exact name in api-gateway/service.yaml
+                port:
+                  number: 3001 # Must match the port defined in api-gateway/service.yaml
