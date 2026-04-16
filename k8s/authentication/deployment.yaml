@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: keycloak
-          image: your-dockerhub-user/health-auth:latest
+          image: amzalfoumi/authentication-service:latest
           imagePullPolicy: IfNotPresent
           args:
             - start-dev

@@ -7,6 +7,6 @@ resources:
   - service.yaml
 
 images:
-  - name: your-dockerhub-user/health-auth
-    newName: your-dockerhub-user/health-auth
+  - name: amzalfoumi/authentication-service
+    newName: amzalfoumi/authentication-service
     newTag: latest
