@@ -8,4 +8,4 @@ resources:
 images:
 - name: amzalfoumi/api-gateway
   newName: amzalfoumi/api-gateway
-  newTag: 874d878
+  newTag: ff4fc11
