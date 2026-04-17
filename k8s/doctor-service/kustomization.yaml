@@ -8,4 +8,4 @@ resources:
 images:
 - name: amzalfoumi/doctor-service
   newName: amzalfoumi/doctor-service
-  newTag: 10a54e2
+  newTag: 57a062b
