@@ -8,4 +8,4 @@ resources:
 images:
 - name: amzalfoumi/appointment-service
   newName: amzalfoumi/appointment-service
-  newTag: 57a062b
+  newTag: 484050b
