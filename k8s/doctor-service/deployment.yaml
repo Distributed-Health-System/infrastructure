@@ -19,6 +19,9 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3003
+          env:
+            - name: FIREBASE_SERVICE_ACCOUNT_PATH
+              value: "/app/secrets/firebase/service-account.json"
           envFrom:
             - secretRef:
                 name: doctor-service-secret
