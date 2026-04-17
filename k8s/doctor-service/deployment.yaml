@@ -24,6 +24,10 @@ spec:
                 name: doctor-service-secret
             - configMapRef:
                 name: doctor-service-config
+          volumeMounts:
+            - name: firebase-volume
+              mountPath: "/app/secrets/firebase"
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -31,3 +35,7 @@ spec:
             limits:
               cpu: 250m
               memory: 256Mi
+      volumes:
+        - name: firebase-volume
+          secret:
+            secretName: firebase-key-secret

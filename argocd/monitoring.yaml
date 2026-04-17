@@ -1,0 +1,79 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    #  Official Helm repository (No local Helm CLI needed)
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: "61.3.0"
+    helm:
+      releaseName: kube-prometheus-stack
+      values: |
+        grafana:
+          enabled: true
+          adminPassword: "admin123"
+          service:
+            type: NodePort
+            nodePort: 30030
+        prometheus:
+          prometheusSpec:
+            retention: 7d
+            podMonitorSelectorNilUsesHelmValues: false
+            serviceMonitorSelectorNilUsesHelmValues: false
+            # Automatically scrape your microservices namespace
+            additionalScrapeConfigs:
+              - job_name: 'distributed-health-pods'
+                kubernetes_sd_configs:
+                  - role: pod
+                    namespaces:
+                      names:
+                        - distributed-health
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: "true"
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+                    action: replace
+                    target_label: __address__
+                    regex: ([^:]+)(?::\d+)?;(\d+)
+                    replacement: $1:$2
+                  - source_labels: [__meta_kubernetes_pod_name]
+                    target_label: pod
+          service:
+            type: NodePort
+            nodePort: 30090
+        alertmanager:
+          enabled: false
+        nodeExporter:
+          enabled: true
+        kubeStateMetrics:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Fixes the "annotations too long" CRD error
+      - ServerSideApply=true
+  # Fixes the infinite "OutOfSync" loop caused by dynamic Webhook certificates
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      name: kube-prometheus-stack-admission
+      jqPathExpressions:
+        - ".webhooks[].clientConfig.caBundle"
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      name: kube-prometheus-stack-admission
+      jqPathExpressions:
+        - ".webhooks[].clientConfig.caBundle"
