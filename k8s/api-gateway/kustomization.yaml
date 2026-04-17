@@ -2,13 +2,12 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: distributed-health
 resources:
-  - configmap.yaml
-  - deployment.yaml
-  - service.yaml
-  - ingress.yaml
+- configmap.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
 
 images:
-  - name: amzalfoumi/api-gateway
-    newName: amzalfoumi/api-gateway
-    newTag: ff4fc11
-
+- name: amzalfoumi/api-gateway
+  newName: amzalfoumi/api-gateway
+  newTag: a906e67
