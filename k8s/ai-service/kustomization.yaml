@@ -8,4 +8,4 @@ resources:
 images:
 - name: amzalfoumi/ai-service
   newName: amzalfoumi/ai-service
-  newTag: 9f03b92
+  newTag: 72062ab
