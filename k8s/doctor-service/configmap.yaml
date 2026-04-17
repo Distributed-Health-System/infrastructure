@@ -14,3 +14,5 @@ data:
   TELEMEDICINE_SERVICE_URL: "http://telemedicine-service:3006"
   NOTIFICATION_SERVICE_URL: "http://notification-service:3007"
   AI_SERVICE_URL: "http://ai-service:3008"
+  KEYCLOAK_URL: "http://keycloak:8080"
+  KEYCLOAK_REALM: "health-system"
