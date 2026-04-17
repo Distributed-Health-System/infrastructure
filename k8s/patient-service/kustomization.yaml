@@ -8,4 +8,4 @@ resources:
 images:
 - name: amzalfoumi/patient-service
   newName: amzalfoumi/patient-service
-  newTag: 57a062b
+  newTag: 484050b
