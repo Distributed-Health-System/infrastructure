@@ -7,7 +7,7 @@ metadata:
     # Enable CORS in NGINX
     nginx.ingress.kubernetes.io/enable-cors: "true"
     # Allow your Vercel frontend and local React/Next app
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://frontend.example.com, http://localhost:3000"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
     # Allow standard HTTP methods plus OPTIONS for preflight
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
     # MUST explicitly allow standard headers AND the custom ngrok header
