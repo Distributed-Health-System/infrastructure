@@ -8,4 +8,4 @@ resources:
 images:
 - name: amzalfoumi/payment-service
   newName: amzalfoumi/payment-service
-  newTag: d04ab91
+  newTag: e2d47db
