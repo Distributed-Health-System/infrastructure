@@ -9,4 +9,4 @@ resources:
 images:
 - name: amzalfoumi/authentication-service
   newName: amzalfoumi/authentication-service
-  newTag: 3d89001
+  newTag: d4c9e79
