@@ -19,11 +19,18 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3002
+          env:
+            - name: FIREBASE_SERVICE_ACCOUNT_PATH
+              value: "/app/secrets/firebase/service-account.json"
           envFrom:
             - secretRef:
                 name: patient-service-secret
             - configMapRef:
                 name: patient-service-config
+          volumeMounts:
+            - name: firebase-volume
+              mountPath: "/app/secrets/firebase"
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -31,3 +38,7 @@ spec:
             limits:
               cpu: 250m
               memory: 256Mi
+      volumes:
+        - name: firebase-volume
+          secret:
+            secretName: firebase-key-secret
