@@ -8,4 +8,4 @@ resources:
 images:
 - name: amzalfoumi/notification-service
   newName: amzalfoumi/notification-service
-  newTag: 10a54e2
+  newTag: 57a062b
