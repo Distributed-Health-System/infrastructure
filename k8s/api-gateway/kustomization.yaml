@@ -10,4 +10,4 @@ resources:
 images:
 - name: amzalfoumi/api-gateway
   newName: amzalfoumi/api-gateway
-  newTag: e6dcf9f
+  newTag: 97c70f5
