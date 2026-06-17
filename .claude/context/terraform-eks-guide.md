@@ -2,7 +2,7 @@
 
 This document covers the Terraform workflow, required components, and AWS-specific configuration needed to provision and destroy the DistributedHealth platform on AWS EKS.
 
-**Region: us-east-1 (N. Virginia)** — chosen because it has the lowest per-hour prices of any AWS region. Note: AWS Free Tier is account-wide and does not vary by region. EKS control plane and t3.medium nodes are NOT covered by the free tier — costs are real but minimised by using us-east-1 and destroying the cluster after each demo.
+**Region: us-east-1 (N. Virginia)** — chosen because it has the lowest per-hour prices of any AWS region.
 
 ---
 
@@ -27,6 +27,45 @@ kubectl get nodes   # verify cluster is up
 ```
 
 ArgoCD then syncs the k8s manifests from `argocd/application.yaml` automatically.
+
+---
+
+## Terraform File Structure
+
+All files live under `infrastructure/terraform/`.
+
+```
+terraform/
+├── variables.tf    # all configurable inputs (region, cluster name, node count, instance type)
+├── main.tf         # VPC + EKS cluster + destroy-time ALB cleanup hook
+├── helm.tf         # AWS Load Balancer Controller — IAM policy, IRSA role, Helm install
+└── outputs.tf      # values printed after apply (cluster name, endpoint, kubeconfig command)
+```
+
+### `variables.tf`
+Single source of truth for all configurable values. Every other file references `var.*` — nothing is hardcoded elsewhere. Key variables: `aws_region`, `cluster_name`, `kubernetes_version`, `node_instance_type`, `node_desired_count`.
+
+### `main.tf`
+Contains three logical sections:
+- **Provider blocks** — configures the AWS, Kubernetes, and Helm providers. The Kubernetes and Helm providers authenticate using `aws eks get-token` at runtime, so they only resolve after the EKS cluster exists.
+- **VPC module** — creates the network: private subnets (nodes), public subnets (load balancers), one NAT Gateway so nodes can pull images.
+- **EKS module** — creates the control plane and managed node group (3× t3.small).
+- **`terraform_data.cleanup_alb_before_destroy`** — a destroy-time hook that deletes Ingress objects so the LBC removes the ALB before Terraform tries to delete the VPC. Without this, the VPC destroy fails because the ALB still holds subnet references.
+
+### `helm.tf`
+Installs the AWS Load Balancer Controller entirely via Terraform — no manual commands needed:
+1. Fetches the official IAM policy JSON from the controller's GitHub repo (`data.http`)
+2. Creates the IAM policy in your AWS account (`aws_iam_policy`)
+3. Creates an IAM role bound to a Kubernetes service account via OIDC — IRSA (`module.lbc_irsa`)
+4. Installs the controller into `kube-system` via Helm (`helm_release.lbc`)
+
+### `outputs.tf`
+Prints after `terraform apply`:
+- `cluster_name` — for `aws eks update-kubeconfig`
+- `cluster_endpoint` — the EKS API server URL
+- `kubeconfig_command` — the exact command to run, ready to copy-paste
+- `vpc_id` — needed if troubleshooting ALB or security groups
+- `oidc_provider_arn` — needed if you add IRSA for other services later
 
 ---
 
@@ -108,18 +147,6 @@ aws ec2 describe-nat-gateways --region us-east-1 --filter "Name=state,Values=ava
 
 ---
 
-## Terraform File Structure (to be created under `terraform/`)
-
-```
-terraform/
-├── main.tf         # VPC + EKS cluster + node group
-├── variables.tf    # region, cluster name, instance type, k8s version
-├── outputs.tf      # cluster endpoint, OIDC ARN, kubeconfig command
-└── helm.tf         # AWS Load Balancer Controller via Helm provider
-```
-
----
-
 ## Component 1: VPC — `terraform-aws-modules/vpc/aws`
 
 **Source:** https://github.com/terraform-aws-modules/terraform-aws-vpc
@@ -131,10 +158,10 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 5.0"
 
-  name = "distributed-health-vpc"
+  name = "${var.cluster_name}-vpc"
   cidr = "10.0.0.0/16"
 
-  azs             = ["us-east-1a", "us-east-1b"]
+  azs             = ["${var.aws_region}a", "${var.aws_region}b"]
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
   public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
 
@@ -152,8 +179,8 @@ module "vpc" {
   }
 
   tags = {
-    "kubernetes.io/cluster/distributed-health" = "shared"
-    Project = "distributed-health"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    Project = var.cluster_name
   }
 }
 ```
@@ -164,17 +191,17 @@ module "vpc" {
 
 ## Component 2: EKS Cluster — `terraform-aws-modules/eks/aws`
 
-**Source:** https://github.com/terraform-aws-modules/terraform-aws-eks  
-**Current version:** `~> 21.0`  
-**Supported Kubernetes version:** `1.33` (latest as of 2026)
+**Source:** https://github.com/terraform-aws-modules/terraform-aws-eks
+**Current version:** `~> 21.0`
+**Kubernetes version:** `1.32`
 
 ```hcl
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
-  name               = "distributed-health"
-  kubernetes_version = "1.32"
+  name               = var.cluster_name
+  kubernetes_version = var.kubernetes_version
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
@@ -183,40 +210,49 @@ module "eks" {
 
   eks_managed_node_groups = {
     general = {
-      instance_types = ["t3.small"]    # 2 vCPU, 2GB — 3 nodes gives 6GB total across cluster
-      min_size       = 3
-      max_size       = 3
-      desired_size   = 3
+      instance_types = [var.node_instance_type]   # t3.small — 2 vCPU, 2GB
+      min_size       = var.node_min_count          # 3
+      max_size       = var.node_max_count          # 3
+      desired_size   = var.node_desired_count      # 3
     }
   }
 
   tags = {
-    Project = "distributed-health"
+    Project = var.cluster_name
   }
 }
 ```
 
 **Key outputs:**
-- `module.eks.cluster_name` — used in helm and kubeconfig
+- `module.eks.cluster_name` — used in Helm and kubeconfig
 - `module.eks.cluster_endpoint` — API server URL
-- `module.eks.oidc_provider_arn` — required for IAM Roles for Service Accounts (IRSA)
+- `module.eks.oidc_provider_arn` — required for IRSA
 - `module.eks.cluster_certificate_authority_data` — for Kubernetes provider auth
 
 ---
 
 ## Component 3: AWS Load Balancer Controller
 
-**Replaces:** the `ingressClassName: nginx` in `k8s/api-gateway/ingress.yaml`  
-**Docs:** https://docs.aws.amazon.com/eks/latest/userguide/lbc-helm.html  
-**Controller version:** v2.14.1  
-**Helm chart version:** 1.14.0
+**Replaces:** `ingressClassName: nginx` in `k8s/api-gateway/ingress.yaml`
+**Controller version:** v2.14.1 | **Helm chart version:** 1.14.0
 
-The LBC watches Ingress resources and creates an AWS Application Load Balancer (ALB) automatically. It requires:
-1. An IAM policy downloaded from the controller GitHub repo
-2. An IAM role bound to a Kubernetes service account via OIDC (IRSA)
-3. Helm install into `kube-system`
+The LBC watches Ingress resources and creates AWS Application Load Balancers automatically.
 
-### Step 1 — IAM Policy (run once per AWS account)
+### Primary: Automated via `helm.tf`
+
+All three steps (IAM policy, IRSA role, Helm install) run automatically as part of `terraform apply`. No manual commands needed.
+
+Verify after apply:
+```bash
+kubectl get deployment -n kube-system aws-load-balancer-controller
+# Expected: READY 2/2
+```
+
+### Fallback: Manual installation (if `helm_release.lbc` fails in Terraform)
+
+If the Terraform Helm install fails (e.g., timeout, provider auth issue), you can install the LBC manually after the cluster is up. These steps are fully valid and produce the same result.
+
+**Step 1 — IAM Policy** (skip if the policy already exists from a partial apply)
 ```bash
 curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.14.1/docs/install/iam_policy.json
 
@@ -225,7 +261,9 @@ aws iam create-policy \
   --policy-document file://iam_policy.json
 ```
 
-### Step 2 — IAM Service Account (run once per cluster)
+**Step 2 — IRSA Service Account**
+
+Requires `eksctl` installed. Replace `<AWS_ACCOUNT_ID>` with your account ID (find it with `aws sts get-caller-identity`).
 ```bash
 eksctl create iamserviceaccount \
   --cluster=distributed-health \
@@ -237,7 +275,9 @@ eksctl create iamserviceaccount \
   --approve
 ```
 
-### Step 3 — Helm Install
+**Step 3 — Helm Install**
+
+Replace `<vpc-id>` with the VPC ID from `terraform output vpc_id`.
 ```bash
 helm repo add eks https://aws.github.io/eks-charts
 helm repo update eks
@@ -252,7 +292,7 @@ helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
   --version 1.14.0
 ```
 
-### Step 4 — Verify
+**Step 4 — Verify**
 ```bash
 kubectl get deployment -n kube-system aws-load-balancer-controller
 # Expected: READY 2/2
@@ -262,7 +302,7 @@ kubectl get deployment -n kube-system aws-load-balancer-controller
 
 ## Ingress Change Required
 
-The existing ingress at `k8s/api-gateway/ingress.yaml` uses `ingressClassName: nginx`.  
+The existing ingress at `k8s/api-gateway/ingress.yaml` uses `ingressClassName: nginx`.
 For EKS with ALB, change it to:
 
 ```yaml
@@ -271,8 +311,6 @@ metadata:
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    # Update CORS origin to real frontend domain:
-    # alb.ingress.kubernetes.io/...
 spec:
   ingressClassName: alb   # replaces: nginx
 ```
@@ -318,38 +356,41 @@ us-east-1 has the lowest prices of any AWS region. These are pay-per-use — the
 | Resource | Rate | Note |
 |---|---|---|
 | EKS control plane | $0.10/hr | No free tier — always charged |
-| 3× t3.small nodes | $0.0208/hr each | $0.0624/hr total for all 3 nodes |
+| 3× t3.small nodes | $0.0208/hr each | $0.0624/hr total — see free tier note below |
 | NAT Gateway | $0.045/hr + $0.045/GB | Single NAT GW to keep cost low |
 | ALB | $0.008/hr + LCU charges | Created by Load Balancer Controller |
-| **Total while running** | **~$0.215/hr** | |
+| **Total while running** | **~$0.215/hr** | Nodes may be $0 depending on account |
 | **After `terraform destroy`** | **$0.00** | All resources removed |
 
-**Node RAM:** 3× t3.small = 6GB total. After Kubernetes reserves ~460MB per node, usable capacity is ~4GB across the cluster. Tight for long runs (Keycloak's 1Gi limit fills most of one node), but fine for short demos.
+**Node RAM:** 3× t3.small = 6GB total. After Kubernetes reserves ~460MB per node, usable capacity is ~4.6GB across the cluster. Keycloak's 1Gi limit fills most of one node — fine for short demos, tight for long runs.
 
-**Free tier reality:** AWS Free Tier is account-wide (not region-specific). EKS control plane has no free tier. The $0.10/hr control plane cost is always charged regardless of instance type or account age.
+**Free tier / credits:**
+- **EKS control plane ($0.10/hr)** — no free tier, no credit exemption. Always charged.
+- **t3.small nodes** — standard AWS Free Tier only covers t2.micro (750 hrs/month, 12 months). However, if your account has AWS credits (e.g., from AWS Educate, Activate for Startups, or other programmes), those credits apply and can cover t3.small costs. Check your account's credit balance at **AWS Console → Billing → Credits**.
+- **NAT Gateway and ALB** — not covered by any free tier; charged by the hour.
 
 ---
 
 ## Quick Reference Commands
 
 ```bash
-# Provision
+# Provision (runs everything including LBC install)
 cd terraform && terraform init && terraform apply
 
-# Wire kubectl
+# Wire kubectl (command also printed by terraform output)
 aws eks update-kubeconfig --name distributed-health --region us-east-1
 
 # Load secrets
 bash setup-secrets.sh
 
-# Install LBC (after cluster up)
-helm install aws-load-balancer-controller ...
-
-# Install ArgoCD
+# Install ArgoCD and apply app manifest
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 kubectl apply -f argocd/application.yaml
 
-# Destroy everything (ALB cleanup runs automatically — see "Destroying the Cluster" section)
+# Verify LBC is running
+kubectl get deployment -n kube-system aws-load-balancer-controller
+
+# Destroy everything (ALB cleanup runs automatically)
 cd terraform && terraform destroy
 ```
