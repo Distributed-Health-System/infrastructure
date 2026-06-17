@@ -2,11 +2,16 @@
 
 This document is a complete, self-contained description of the `terraform-demo-USJ` repository. It is intended to be fed to Claude Code in another project so it can understand what exists here without reading the source files directly.
 
+# Original Repository
+
+refer original repo here - https://github.com/Nikila99gimhan/terraform-demo-USJ
+
 ---
 
 ## Purpose
 
 A two-phase Terraform demo on AWS, built for a USJ session. It demonstrates:
+
 - The progression from **local state** to **remote S3 state**
 - **S3 native locking** (Terraform >= 1.10, no DynamoDB required)
 - **GitHub Actions automation** via **OIDC** (no long-lived AWS credentials)
@@ -52,12 +57,12 @@ terraform-demo-USJ/
 
 ### Resources created
 
-| Resource | Name/ID | Notes |
-|---|---|---|
-| `aws_s3_bucket` | `terraform-state-<account-id>-demo` | `force_destroy = true` so it can be deleted even with state files inside |
-| `aws_s3_bucket_versioning` | (same bucket) | `Enabled` — retains every state file version |
-| `aws_s3_bucket_server_side_encryption_configuration` | (same bucket) | AES256, `bucket_key_enabled = true` |
-| `aws_s3_bucket_public_access_block` | (same bucket) | All four block settings set to `true` |
+| Resource                                             | Name/ID                             | Notes                                                                    |
+| ---------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------ |
+| `aws_s3_bucket`                                      | `terraform-state-<account-id>-demo` | `force_destroy = true` so it can be deleted even with state files inside |
+| `aws_s3_bucket_versioning`                           | (same bucket)                       | `Enabled` — retains every state file version                             |
+| `aws_s3_bucket_server_side_encryption_configuration` | (same bucket)                       | AES256, `bucket_key_enabled = true`                                      |
+| `aws_s3_bucket_public_access_block`                  | (same bucket)                       | All four block settings set to `true`                                    |
 
 **Bucket name formula:** `terraform-state-${data.aws_caller_identity.current.account_id}-demo`
 
@@ -116,15 +121,15 @@ variable "instance_type" {
 
 ### Resources created (6 total)
 
-| Resource | Name tag | Key settings |
-|---|---|---|
-| `aws_vpc.main` | `demo-vpc` | CIDR `10.0.0.0/16`, DNS hostnames + support enabled |
-| `aws_subnet.public` | `demo-public-subnet` | CIDR `10.0.1.0/24`, AZ `us-east-1a`, `map_public_ip_on_launch = true` |
-| `aws_internet_gateway.main` | `demo-igw` | Attached to VPC |
-| `aws_route_table.public` | `demo-public-rt` | Route `0.0.0.0/0 → IGW` |
-| `aws_route_table_association.public` | — | Associates public subnet with route table |
-| `aws_security_group.web_server` | `demo-web-server-sg` | Ingress: 22 (SSH), 80 (HTTP), 443 (HTTPS) from `0.0.0.0/0`; Egress: all |
-| `aws_instance.web_server` | `demo-web-server` | See detail below |
+| Resource                             | Name tag             | Key settings                                                            |
+| ------------------------------------ | -------------------- | ----------------------------------------------------------------------- |
+| `aws_vpc.main`                       | `demo-vpc`           | CIDR `10.0.0.0/16`, DNS hostnames + support enabled                     |
+| `aws_subnet.public`                  | `demo-public-subnet` | CIDR `10.0.1.0/24`, AZ `us-east-1a`, `map_public_ip_on_launch = true`   |
+| `aws_internet_gateway.main`          | `demo-igw`           | Attached to VPC                                                         |
+| `aws_route_table.public`             | `demo-public-rt`     | Route `0.0.0.0/0 → IGW`                                                 |
+| `aws_route_table_association.public` | —                    | Associates public subnet with route table                               |
+| `aws_security_group.web_server`      | `demo-web-server-sg` | Ingress: 22 (SSH), 80 (HTTP), 443 (HTTPS) from `0.0.0.0/0`; Egress: all |
+| `aws_instance.web_server`            | `demo-web-server`    | See detail below                                                        |
 
 ### EC2 instance detail
 
@@ -158,10 +163,12 @@ Project     = "terraform-infra-demo"
 **Trigger:** `workflow_call` only (never triggered directly)
 
 **Inputs:**
+
 - `module` (required, string): `bootstrap` | `infrastructure`
 - `action` (required, string): `plan` | `apply` | `destroy`
 
 **Secrets:**
+
 - `AWS_ROLE_ARN` (required)
 
 **Permissions:** `id-token: write`, `contents: read`
@@ -169,12 +176,14 @@ Project     = "terraform-infra-demo"
 **Runner:** `ubuntu-latest`
 
 **Working directory logic:**
+
 ```
 module == 'bootstrap'      → terraform-demo/01-bootstrap
 module == 'infrastructure' → terraform-demo/02-infrastructure
 ```
 
 **Steps:**
+
 1. `actions/checkout@v4`
 2. `aws-actions/configure-aws-credentials@v4` — OIDC role assumption, region `us-east-1`
 3. `hashicorp/setup-terraform@v3` — version `~> 1.10`
@@ -190,6 +199,7 @@ module == 'infrastructure' → terraform-demo/02-infrastructure
 **Trigger:** `workflow_dispatch`
 
 **Inputs (both required, choice type):**
+
 - `action`: `plan` | `apply`
 - `module`: `bootstrap` | `infrastructure`
 
@@ -204,8 +214,9 @@ Delegates entirely to `_reusable-terraform.yml`.
 **Trigger:** `workflow_dispatch`
 
 **Inputs (required, choice type):**
+
 - `module`: `infrastructure` | `bootstrap`  
-  *(infrastructure listed first as a hint — always destroy it before bootstrap)*
+  _(infrastructure listed first as a hint — always destroy it before bootstrap)_
 
 **Permissions:** `id-token: write`, `contents: read`
 
