@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.0"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -114,4 +118,55 @@ module "eks" {
   tags = {
     Project = var.cluster_name
   }
+}
+
+# ---------------------------------------------------------------------------
+# Pre-destroy ALB cleanup
+# Deletes the Ingress object before the LBC and cluster are torn down.
+# The LBC sees the deletion and removes the ALB from AWS — without this,
+# the VPC destroy fails because the ALB still holds subnet/SG references.
+#
+# Dependency chain (destroy order):
+#   this resource → helm_release.lbc → module.eks → module.vpc
+# ---------------------------------------------------------------------------
+
+resource "terraform_data" "cleanup_alb_before_destroy" {
+  triggers_replace = [module.eks.cluster_name, var.aws_region, module.vpc.vpc_id]
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      CLUSTER="${self.triggers_replace[0]}"
+      REGION="${self.triggers_replace[1]}"
+      VPC_ID="${self.triggers_replace[2]}"
+
+      echo "==> Updating kubeconfig for cluster: $CLUSTER"
+      aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION"
+
+      echo "==> Deleting Ingress resources (triggers LBC to remove the ALB)..."
+      kubectl delete ingress --all --namespace distributed-health --ignore-not-found
+
+      echo "==> Waiting 60s for AWS to remove the ALB..."
+      sleep 60
+
+      echo "==> Checking for remaining ALBs in VPC: $VPC_ID"
+      REMAINING=$(aws elbv2 describe-load-balancers \
+        --region "$REGION" \
+        --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+        --output text)
+
+      if [ -n "$REMAINING" ]; then
+        echo ""
+        echo "WARNING: ALB(s) still exist — VPC destroy will fail unless removed manually."
+        echo "Go to AWS Console > EC2 > Load Balancers and delete:"
+        echo "$REMAINING"
+        echo ""
+      else
+        echo "==> All ALBs removed. Safe to proceed with terraform destroy."
+      fi
+    EOT
+    on_failure = continue
+  }
+
+  depends_on = [helm_release.lbc]
 }

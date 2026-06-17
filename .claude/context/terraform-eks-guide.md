@@ -30,6 +30,84 @@ ArgoCD then syncs the k8s manifests from `argocd/application.yaml` automatically
 
 ---
 
+## Destroying the Cluster
+
+`terraform destroy` is the single command to bring all costs to zero. The destroy is fully automated — no manual steps required under normal conditions.
+
+### What happens automatically
+
+`main.tf` contains a `terraform_data.cleanup_alb_before_destroy` resource with a destroy-time provisioner. Terraform's destroy order ensures this runs first:
+
+```
+cleanup_alb_before_destroy  →  helm_release.lbc  →  module.eks  →  module.vpc
+```
+
+The provisioner:
+1. Runs `aws eks update-kubeconfig` (re-authenticates kubectl to the still-running cluster)
+2. Deletes all Ingress objects in the `distributed-health` namespace
+3. The LBC sees the deletion and removes the ALB from AWS
+4. Waits 60 seconds for AWS to fully remove the ALB
+5. Checks via `aws elbv2 describe-load-balancers` whether any ALBs remain in the VPC
+6. Prints a clear warning if any are still up, or confirms success
+
+Normal output looks like:
+```
+==> Updating kubeconfig for cluster: distributed-health
+==> Deleting Ingress resources (triggers LBC to remove the ALB)...
+==> Waiting 60s for AWS to remove the ALB...
+==> Checking for remaining ALBs in VPC: vpc-xxxxxxxxx
+==> All ALBs removed. Safe to proceed with terraform destroy.
+```
+
+### If the WARNING appears (ALBs still up)
+
+If the output contains:
+```
+WARNING: ALB(s) still exist — VPC destroy will fail unless removed manually.
+Go to AWS Console > EC2 > Load Balancers and delete:
+arn:aws:elasticloadbalancing:us-east-1:...
+```
+
+The VPC deletion will fail with a dependency error. Fix it manually:
+
+1. Go to **AWS Console → EC2 → Load Balancers**
+2. Find the ALB listed in the warning (match by ARN or name)
+3. Select it → **Actions → Delete**
+4. Re-run `terraform destroy` — it will pick up where it left off
+
+### If terraform destroy itself gets stuck or partially fails
+
+Terraform tracks state in `terraform.tfstate`. A partial destroy leaves some resources up. To identify what remains:
+
+```bash
+# See what Terraform still thinks exists
+terraform state list
+
+# Try destroy again — Terraform skips already-destroyed resources
+terraform destroy
+```
+
+If a specific resource is stuck (e.g., a security group that AWS won't delete):
+```bash
+# Remove it from Terraform state without touching AWS (use as last resort)
+terraform state rm <resource_address>
+# Then delete it manually in the AWS Console
+```
+
+After any manual cleanup, verify nothing is left running:
+```bash
+# Check for remaining EKS clusters
+aws eks list-clusters --region us-east-1
+
+# Check for remaining load balancers in the region
+aws elbv2 describe-load-balancers --region us-east-1 --query "LoadBalancers[].LoadBalancerName"
+
+# Check for remaining NAT Gateways (they cost money even if idle)
+aws ec2 describe-nat-gateways --region us-east-1 --filter "Name=state,Values=available" --query "NatGateways[].NatGatewayId"
+```
+
+---
+
 ## Terraform File Structure (to be created under `terraform/`)
 
 ```
@@ -272,6 +350,6 @@ kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 kubectl apply -f argocd/application.yaml
 
-# Destroy everything
+# Destroy everything (ALB cleanup runs automatically — see "Destroying the Cluster" section)
 cd terraform && terraform destroy
 ```
