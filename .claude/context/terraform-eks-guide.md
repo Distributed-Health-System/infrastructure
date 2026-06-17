@@ -300,26 +300,31 @@ kubectl get deployment -n kube-system aws-load-balancer-controller
 
 ---
 
-## Ingress Change Required
+## Ingress Change — DONE (2026-06-17)
 
-The existing ingress at `k8s/api-gateway/ingress.yaml` uses `ingressClassName: nginx`.
-For EKS with ALB, change it to:
+`k8s/api-gateway/ingress.yaml` has been converted from nginx to ALB. It now uses:
 
 ```yaml
 metadata:
   annotations:
-    kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
 spec:
-  ingressClassName: alb   # replaces: nginx
+  ingressClassName: alb
 ```
+
+The old `nginx.ingress.kubernetes.io/*` CORS annotations were removed — ALB has no CORS
+feature; CORS is handled in the api-gateway app (`src/main.ts`). Note its allowed origin
+is hardcoded to `http://localhost:3000` and must be updated for the real frontend origin.
 
 ---
 
 ## Secrets Management on EKS
 
 The existing `setup-secrets.sh` script works on EKS — just run it after `aws eks update-kubeconfig`.
+It now also creates the `firebase-key-secret` file secret automatically (from
+`k8s/doctor-service/firebase-service-account.json`), so no separate manual step is needed.
 
 All secrets that must exist before ArgoCD sync:
 - `api-gateway-secret`

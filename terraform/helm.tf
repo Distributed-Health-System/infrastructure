@@ -30,10 +30,11 @@ resource "aws_iam_policy" "lbc" {
 # ---------------------------------------------------------------------------
 
 module "lbc_irsa" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "~> 5.52"
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "~> 6.0"
 
-  role_name = "AWSLoadBalancerController-${var.cluster_name}"
+  name            = "AWSLoadBalancerController-${var.cluster_name}"
+  use_name_prefix = false
 
   attach_load_balancer_controller_policy = true
 
@@ -73,7 +74,7 @@ resource "helm_release" "lbc" {
 
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = module.lbc_irsa.iam_role_arn
+    value = module.lbc_irsa.arn
   }
 
   set {

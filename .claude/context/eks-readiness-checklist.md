@@ -27,9 +27,19 @@ metadata:
 spec:
   ingressClassName: alb
 ```
-The nginx CORS annotations do nothing on ALB (ALB has no CORS feature). CORS must be
-handled inside the api-gateway app — confirm it sets CORS headers itself before
-dropping the annotations.
+The nginx CORS annotations do nothing on ALB (ALB has no CORS feature). CORS is already
+handled inside the api-gateway app, so dropping them is safe.
+
+**Status: DONE on `dev`** (ingress converted to ALB). Verified the gateway sets CORS
+itself at `api-gateway/src/main.ts:20`:
+`app.enableCors({ origin: 'http://localhost:3000', credentials: true })`.
+
+> **REMAINING ISSUE (B1 follow-up):** that allowed origin is **hardcoded to
+> `http://localhost:3000`**. Once the frontend is served from a real origin (the ALB DNS,
+> or the Vercel domain), browser requests will be **CORS-blocked** until `main.ts` is
+> updated — ideally to read the allowed origin(s) from an env var (e.g. `CORS_ORIGIN`)
+> wired through the api-gateway ConfigMap, rather than a hardcoded string. This lives in
+> the api-gateway service repo, not infra, so it must be changed and redeployed there.
 
 ### B2. `firebase-key-secret` is never created
 `doctor-service` and `patient-service` mount a volume from secret `firebase-key-secret`
@@ -39,14 +49,10 @@ But `setup-secrets.sh` only creates **env-file** secrets — nothing creates thi
 **file** secret. Both pods stay in `ContainerCreating` (their `secretRef`s are also
 **required**, not optional — see secrets section). This blocks two services.
 
-Fix — add to `setup-secrets.sh` (and run it), keying the file as `service-account.json`:
-```bash
-kubectl create secret generic firebase-key-secret \
-  --from-file=service-account.json=k8s/doctor-service/firebase-service-account.json \
-  -n distributed-health \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-(doctor and patient share the same Firebase project file; one secret serves both.)
+**Status: DONE on `dev`** — `setup-secrets.sh` now creates `firebase-key-secret` from
+`k8s/doctor-service/firebase-service-account.json` (key `service-account.json`) after the
+env-file loop. doctor and patient share the same Firebase project (`distributed-health-5b963`),
+so one secret serves both. Just run `bash setup-secrets.sh` after `update-kubeconfig`.
 
 ### B3. Branch split: CI writes `main`, you work on `dev`, ArgoCD tracks `HEAD`
 - All 8 service CI workflows commit image-tag bumps to the **infra repo `main`**

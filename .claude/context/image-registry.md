@@ -29,8 +29,10 @@ Images are **public**. EKS nodes can pull them without credentials or `imagePull
 Each service lives in its own GitHub repository with its own GitHub Actions workflow. The workflow:
 
 1. Builds the Docker image
-2. Pushes it to Docker Hub with a specific tag (e.g. git SHA or version — **not** `latest`)
-3. Runs `kustomize edit set image <service>=amzalfoumi/<service>:<new-tag>` against this infrastructure repo
+2. Pushes it to Docker Hub with **two** tags: the git short-SHA *and* `latest`
+   (e.g. `amzalfoumi/api-gateway:97c70f5` and `amzalfoumi/api-gateway:latest`)
+3. Runs `kustomize edit set image <service>=amzalfoumi/<service>:<short-sha>` against this
+   infrastructure repo — so the cluster is always pinned to the immutable SHA tag, never `latest`
 4. Commits the updated `kustomization.yaml` back to this repo
 5. ArgoCD detects the commit and syncs the cluster
 
