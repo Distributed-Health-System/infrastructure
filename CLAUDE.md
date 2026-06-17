@@ -8,8 +8,13 @@ It is the single source of truth for cluster configuration.
 ## Stack
 
 - Kubernetes manifests (plain YAML + Kustomize)
-- Targeting minikube for local development (platform-agnostic — no cloud-specific annotations)
-- Kustomize via `kubectl apply -k` (no Helm)
+- **Primary target: AWS EKS** (provisioned via Terraform in `terraform/`, GitOps via ArgoCD).
+  Cloud-specific annotations (e.g. AWS Load Balancer Controller `alb.ingress.kubernetes.io/*`)
+  are expected and allowed.
+- **Secondary: minikube** for local dev. When running locally, the ALB ingress won't work —
+  swap to the nginx ingress class (`minikube addons enable ingress`) for that environment only.
+- Kustomize via `kubectl apply -k` (no Helm for app manifests; Helm is used by Terraform/ArgoCD
+  for the Load Balancer Controller and the monitoring stack)
 
 ---
 
@@ -115,7 +120,9 @@ Add each new service as a sibling folder under `k8s/` following the same structu
 
 ## Deployment Rules
 
-1. **Always set `imagePullPolicy: IfNotPresent`** for minikube when images are built and pushed by GitHub Actions.
+1. **Always set `imagePullPolicy: IfNotPresent`.** CI builds a unique SHA-tagged image per
+   commit, so a node only pulls a tag it hasn't seen; `IfNotPresent` then avoids redundant
+   re-pulls (and saves Docker Hub rate limit). Works the same on EKS and minikube.
 
 2. **Always include resource requests and limits.** Never omit them.
 
@@ -150,7 +157,10 @@ Add each new service as a sibling folder under `k8s/` following the same structu
 
 5. **`replicas: 1` is fine for local dev.** Do not set it higher unless testing scaling behaviour.
 
-6. **Never use `latest` tag in production.** For minikube local dev it is acceptable when `imagePullPolicy: IfNotPresent` is set and the image has been built and pushed. When moving to a real cluster, switch to explicit versioned tags like `api-gateway:1.0.0`.
+6. **Never deploy the `latest` tag to the cluster.** Each service `kustomization.yaml` pins
+   an immutable SHA tag (set by CI via `kustomize edit set image`); the `:latest` in
+   `deployment.yaml` is only an overridden fallback. On EKS, ArgoCD always deploys the pinned
+   SHA. (For minikube local dev, building `:latest` into the local daemon is acceptable.)
 
 ---
 
@@ -184,12 +194,27 @@ Add each new service as a sibling folder under `k8s/` following the same structu
 
 ---
 
-## Ingress Rules (when added)
+## Ingress Rules
 
-1. Lives at `k8s/ingress/ingress.yaml` — not inside any service folder.
-2. Referenced from the root `k8s/kustomization.yaml`.
-3. Use `nginx` ingress class. Enable the addon first: `minikube addons enable ingress`.
-4. All services behind the ingress must be `ClusterIP` type.
+1. **EKS (primary): use the `alb` ingress class** with AWS Load Balancer Controller
+   annotations. The controller provisions an internet-facing ALB. Current ingress:
+   ```yaml
+   metadata:
+     annotations:
+       alb.ingress.kubernetes.io/scheme: internet-facing
+       alb.ingress.kubernetes.io/target-type: ip
+       alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+   spec:
+     ingressClassName: alb
+   ```
+   For production add an HTTPS listener + `alb.ingress.kubernetes.io/certificate-arn`.
+2. **minikube (local only): use the `nginx` ingress class** (`minikube addons enable ingress`).
+   Do not commit the nginx variant as the default — `alb` is the committed default.
+3. ALB has **no CORS feature** — CORS must be handled in the api-gateway app, not via ingress
+   annotations.
+4. Ingress *should* live at `k8s/ingress/ingress.yaml` (root-level), referenced from the root
+   `k8s/kustomization.yaml`. **Known deviation:** it currently lives in `k8s/api-gateway/`.
+5. All services behind the ingress must be `ClusterIP` type.
 
 ---
 
@@ -212,7 +237,12 @@ kubectl logs -n distributed-health <pod-name>
 kubectl describe pod -n distributed-health <pod-name>
 ```
 
-For local development with minikube, build images into minikube's Docker daemon before applying:
+On **EKS**, you normally don't `kubectl apply` by hand — ArgoCD syncs the manifests from Git.
+The `kubectl apply -k` commands above are for direct/manual debugging. Provisioning,
+kubeconfig, secrets, and the ArgoCD bootstrap are covered in
+`.claude/context/eks-readiness-checklist.md` and `terraform-eks-guide.md`.
+
+For **local development with minikube**, build images into minikube's Docker daemon first:
 
 ```bash
 eval $(minikube docker-env)                   # Git Bash / Linux / Mac

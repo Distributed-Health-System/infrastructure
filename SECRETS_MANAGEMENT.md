@@ -32,3 +32,16 @@ kubectl rollout restart deployment <service-name> -n distributed-health
 (Replace <service-name> with the actual deployment name, e.g., appointment-service)
 
 Note on ArgoCD: ArgoCD will see that the pods restarted, but because the deployment.yaml in Git hasn't fundamentally changed, it will simply maintain its "Synced" and "Healthy" status.
+
+Firebase Service Account (File Secret)
+
+Most secrets are environment variables created from `.env.secret` files. Firebase is different: `doctor-service` and `patient-service` mount a Google service-account **JSON file** as a volume from a secret named `firebase-key-secret` (key: `service-account.json`). Because it is a file rather than env vars, it is NOT created by the `.env.secret` loop — it needs its own command. Without it, both pods get stuck in `ContainerCreating`.
+
+Both services use the same Firebase project, so a single secret serves both. Create it from the committed (gitignored) key file:
+
+kubectl create secret generic firebase-key-secret \
+  --from-file=service-account.json=k8s/doctor-service/firebase-service-account.json \
+  -n distributed-health \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+`setup-secrets.sh` performs this step automatically after creating the env-file secrets. Note that `setup-secrets.sh`, the `.env.secret` files, and `firebase-service-account.json` are all gitignored — they live only on your machine and must be obtained out-of-band when setting up a new environment.

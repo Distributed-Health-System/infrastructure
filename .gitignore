@@ -28,3 +28,10 @@ firebase-service-account.json
 # Kubernetes local secrets
 **/*.env.secret
 setup-secrets.sh
+
+# Terraform local state and cache — never commit these
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfvars

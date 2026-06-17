@@ -11,8 +11,11 @@ Do not generate application code here. This repo is infrastructure only.
 ## What this repo is
 
 - Kubernetes manifests for all DistributedHealth microservices
-- Uses Kustomize (built into kubectl) — no Helm
-- Targets minikube for local dev, must remain platform-agnostic (no cloud-specific annotations)
+- Uses Kustomize (built into kubectl) — no Helm for app manifests
+- **Primary target: AWS EKS** (Terraform-provisioned, ArgoCD GitOps). Cloud-specific
+  annotations are expected — the api-gateway ingress uses the `alb` class with AWS Load
+  Balancer Controller annotations.
+- **Secondary: minikube** for local dev (swap the ingress to the `nginx` class locally only).
 
 ---
 
@@ -106,7 +109,7 @@ resources:
 
 ### deployment.yaml — required fields
 
-- `imagePullPolicy: IfNotPresent` — always, for GitHub Actions-built images used with minikube
+- `imagePullPolicy: IfNotPresent` — always (CI builds a unique SHA tag per commit; works on EKS and minikube)
 - `resources.requests` and `resources.limits` — always, never omit
 - `envFrom.configMapRef` — inject config from ConfigMap, do not hardcode env vars inline
 - Labels must match exactly across `spec.selector.matchLabels`, `template.metadata.labels`, and the Service selector
