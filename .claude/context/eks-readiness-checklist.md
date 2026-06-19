@@ -34,12 +34,11 @@ handled inside the api-gateway app, so dropping them is safe.
 itself at `api-gateway/src/main.ts:20`:
 `app.enableCors({ origin: 'http://localhost:3000', credentials: true })`.
 
-> **REMAINING ISSUE (B1 follow-up):** that allowed origin is **hardcoded to
-> `http://localhost:3000`**. Once the frontend is served from a real origin (the ALB DNS,
-> or the Vercel domain), browser requests will be **CORS-blocked** until `main.ts` is
-> updated — ideally to read the allowed origin(s) from an env var (e.g. `CORS_ORIGIN`)
-> wired through the api-gateway ConfigMap, rather than a hardcoded string. This lives in
-> the api-gateway service repo, not infra, so it must be changed and redeployed there.
+> **DONE (2026-06-19):** `api-gateway/src/main.ts` now reads `CORS_ORIGIN` from the
+> environment (comma-separated list, falls back to `http://localhost:3000`). The
+> `k8s/api-gateway/configmap.yaml` exposes the variable — update its value to the
+> CloudFront URL + Vercel URL before deploying to EKS:
+> `CORS_ORIGIN: "https://xxxxx.cloudfront.net,https://your-app.vercel.app"`
 
 ### B2. `firebase-key-secret` is never created
 `doctor-service` and `patient-service` mount a volume from secret `firebase-key-secret`
@@ -120,7 +119,7 @@ The ALB itself stays HTTP:80 and internal — users never hit it directly. The I
 
 Remaining considerations:
 - **Stripe webhooks** must be pointed at the CloudFront URL (not the ALB DNS). Update the Stripe dashboard webhook endpoint to `https://xxxxx.cloudfront.net/payments/webhook` after Phase 2 apply.
-- **CORS origin in api-gateway** (`src/main.ts`) must also be updated to the CloudFront URL — it is currently hardcoded to `http://localhost:3000` (see B1 follow-up). This is the most likely cause of silent CORS failures after the CloudFront URL is live.
+- **CORS origin in api-gateway** — `src/main.ts` now reads `CORS_ORIGIN` env var (done 2026-06-19). Before Phase 2 deploy, update `k8s/api-gateway/configmap.yaml` `CORS_ORIGIN` value to `"https://your-app.vercel.app,http://localhost:3000"` and redeploy the gateway. (CORS origin = where the frontend HTML is served from, i.e. Vercel — not the CloudFront URL, which is the API destination.)
 - CloudFront distribution takes **5–15 minutes to propagate** after apply before it responds at the edge. The ALB DNS (HTTP) is still reachable directly during that window if needed for smoke testing.
 
 ---
@@ -265,7 +264,7 @@ kubectl apply -f ../argocd/application.yaml       # ensure targetRevision == the
 kubectl get ingress -n distributed-health         # wait until ADDRESS column is populated
 
 # ── Phase 2: wire up CloudFront (R3 mitigation) ──────────────────────────────
-terraform apply                                   # only creates CloudFront distribution
+terraform apply -var enable_cloudfront=true       # only creates CloudFront distribution
 terraform output cloudfront_url                   # → https://xxxxx.cloudfront.net
 
 # Update Stripe webhook endpoint in Stripe dashboard to the CloudFront URL (R3)

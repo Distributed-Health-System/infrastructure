@@ -23,7 +23,7 @@ aws eks update-kubeconfig --name distributed-health --region us-east-1
 kubectl get ingress -n distributed-health   # wait until ADDRESS column is populated
 
 # Phase 2 — build CloudFront now that the ALB exists
-terraform apply     # idempotent — only creates the CloudFront distribution
+terraform apply -var enable_cloudfront=true   # only creates the CloudFront distribution
 terraform output cloudfront_url             # your https://xxxxx.cloudfront.net entry point
 
 # --- demo runs here ---
@@ -343,7 +343,7 @@ data "aws_lb" "ingress_alb" {
 }
 ```
 
-This is why a two-phase apply is required — the ALB must exist before this lookup can succeed.
+This is why a two-phase apply is required — the ALB must exist before this lookup can succeed. The lookup (and the distribution) are gated behind `var.enable_cloudfront` (default `false`), with `count = var.enable_cloudfront ? 1 : 0`. **This gate is mandatory:** a data source is read at *plan* time and `aws_lb` errors if it matches zero load balancers — so without the flag, Phase 1 itself would fail at plan. Phase 2 runs `terraform apply -var enable_cloudfront=true`.
 
 ### Authorization header forwarding (critical)
 
@@ -461,7 +461,7 @@ kubectl get deployment -n kube-system aws-load-balancer-controller
 kubectl get ingress -n distributed-health
 
 # Phase 2 — build CloudFront on top of the now-existing ALB
-cd terraform && terraform apply
+cd terraform && terraform apply -var enable_cloudfront=true
 terraform output cloudfront_url   # → https://xxxxx.cloudfront.net (live in ~5-15 min)
 
 # Quick smoke test (before opening in browser)

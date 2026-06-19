@@ -25,5 +25,5 @@ output "oidc_provider_arn" {
 
 output "cloudfront_url" {
   description = "Public HTTPS entry point (free *.cloudfront.net cert). Point the frontend's API base URL here. Live ~5-15 min after apply."
-  value       = "https://${aws_cloudfront_distribution.edge.domain_name}"
+  value       = var.enable_cloudfront ? "https://${aws_cloudfront_distribution.edge[0].domain_name}" : "(not built — Phase 2: terraform apply -var enable_cloudfront=true)"
 }

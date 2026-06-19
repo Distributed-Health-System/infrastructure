@@ -21,16 +21,22 @@
 #
 # ORDERING NOTE (important): the ALB does not exist during the FIRST
 # `terraform apply` — the LBC only creates it AFTER ArgoCD applies the Ingress.
-# So this is a two-phase apply:
-#   1. terraform apply            (cluster + LBC)
-#   2. let ArgoCD deploy the app  (Ingress -> LBC creates the ALB)
-#   3. terraform apply again      (this file finds the ALB and builds CloudFront)
+# This is a two-phase apply, gated by var.enable_cloudfront:
+#   1. terraform apply                              (cluster + LBC; flag FALSE)
+#   2. let ArgoCD deploy the app                    (Ingress -> LBC creates the ALB)
+#   3. terraform apply -var enable_cloudfront=true  (this file finds the ALB + builds CloudFront)
+#
+# The `count` is essential: a data source is read at PLAN time, and aws_lb
+# ERRORS if it matches zero load balancers. Without the flag, Phase 1 would
+# fail at plan before anything is built. count=0 skips the lookup entirely.
 #
 # We look the ALB up by the tags the LBC stamps on it, rather than hardcoding
 # its random hostname.
 # ---------------------------------------------------------------------------
 
 data "aws_lb" "ingress_alb" {
+  count = var.enable_cloudfront ? 1 : 0
+
   tags = {
     "elbv2.k8s.aws/cluster" = var.cluster_name
     "ingress.k8s.aws/stack" = "distributed-health/api-gateway-ingress"
@@ -71,13 +77,15 @@ data "aws_cloudfront_origin_request_policy" "all_viewer" {
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudfront_distribution" "edge" {
+  count = var.enable_cloudfront ? 1 : 0
+
   enabled         = true
   comment         = "${var.cluster_name} — HTTPS + CDN front door for the ALB"
   is_ipv6_enabled = true
 
   origin {
     origin_id   = "alb-origin"
-    domain_name = data.aws_lb.ingress_alb.dns_name
+    domain_name = data.aws_lb.ingress_alb[0].dns_name
 
     custom_origin_config {
       http_port              = 80
