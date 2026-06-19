@@ -108,10 +108,20 @@ and the realm clients' redirect URIs updated, or login redirects break. Pure
 server-to-server JWKS validation (gateway → `http://keycloak:8080`) is fine as-is.
 
 ### R3. ALB is HTTP-only and its DNS changes every apply
-Ingress defines only HTTP:80, no ACM/TLS. The ALB DNS name is newly generated on every
-`apply`. Consequences: **Stripe webhooks** (payment-service) need a stable public HTTPS
-URL and must be re-pointed each demo; secure cookies / some browser APIs need HTTPS. For
-real payments add an ACM cert (`alb.ingress.kubernetes.io/certificate-arn`) + Route53.
+~~Ingress defines only HTTP:80, no ACM/TLS. The ALB DNS name is newly generated on every `apply`.~~
+
+**MITIGATED (2026-06-19) — CloudFront added (`terraform/cloudfront.tf`).**
+
+CloudFront now sits in front of the ALB and provides:
+- **HTTPS** via the free `*.cloudfront.net` managed certificate — no domain required
+- **A stable URL** (`https://xxxxx.cloudfront.net`) that does not change between applies
+
+The ALB itself stays HTTP:80 and internal — users never hit it directly. The Ingress manifest is unchanged.
+
+Remaining considerations:
+- **Stripe webhooks** must be pointed at the CloudFront URL (not the ALB DNS). Update the Stripe dashboard webhook endpoint to `https://xxxxx.cloudfront.net/payments/webhook` after Phase 2 apply.
+- **CORS origin in api-gateway** (`src/main.ts`) must also be updated to the CloudFront URL — it is currently hardcoded to `http://localhost:3000` (see B1 follow-up). This is the most likely cause of silent CORS failures after the CloudFront URL is live.
+- CloudFront distribution takes **5–15 minutes to propagate** after apply before it responds at the edge. The ALB DNS (HTTP) is still reachable directly during that window if needed for smoke testing.
 
 ---
 
@@ -234,6 +244,7 @@ Issues / blockers:
 ## Corrected run order
 
 ```bash
+# ── Phase 1: provision cluster ────────────────────────────────────────────────
 cd infrastructure/terraform
 terraform init
 terraform apply                                   # ~15 min: VPC + EKS + LBC
@@ -243,17 +254,27 @@ kubectl get nodes                                 # confirm Ready (same IAM iden
 
 # Add the NAT EIP to Atlas Network Access (B4)
 
-bash ../setup-secrets.sh                           # AFTER adding the firebase-key-secret step (B2)
+bash ../setup-secrets.sh                          # AFTER adding the firebase-key-secret step (B2)
 
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-kubectl apply -f ../argocd/application.yaml         # ensure targetRevision == the branch CI pushes (B3)
+kubectl apply -f ../argocd/application.yaml       # ensure targetRevision == the branch CI pushes (B3)
 # Optional, capacity permitting: kubectl apply -f ../argocd/monitoring.yaml   (R1)
 
-kubectl get ingress -n distributed-health          # grab ALB DNS once provisioned (needs B1 fixed)
-# Update Stripe webhook URL to the ALB DNS (R3)
+# Wait until ArgoCD syncs and the LBC creates the ALB
+kubectl get ingress -n distributed-health         # wait until ADDRESS column is populated
 
-# --- demo ---
+# ── Phase 2: wire up CloudFront (R3 mitigation) ──────────────────────────────
+terraform apply                                   # only creates CloudFront distribution
+terraform output cloudfront_url                   # → https://xxxxx.cloudfront.net
 
-terraform destroy                                  # ALB cleanup runs automatically → $0
+# Update Stripe webhook endpoint in Stripe dashboard to the CloudFront URL (R3)
+# Update CORS allowed origin in api-gateway src/main.ts to the CloudFront URL (B1 follow-up)
+
+# Wait ~5-15 min for CloudFront edge propagation, then smoke test:
+curl -I $(terraform output -raw cloudfront_url)
+
+# ── demo runs here ────────────────────────────────────────────────────────────
+
+terraform destroy                                 # ALB cleanup + CloudFront removal → $0
 ```
