@@ -1,0 +1,103 @@
+title DistributedHealth — AWS Cloud Architecture (us-east-1)
+
+// ── External Actors ────────────────────────────────────────────────────────────
+Nextjs Frontend on Vercel [icon: next]
+devTeam [icon: users, label: "Dev Team"]
+github [icon: github, label: "GitHub\ninfra repo (main)"]
+dockerHub [icon: docker, label: "Docker Hub\namzalfoumi/*"]
+
+// ── External SaaS / Data Stores ───────────────────────────────────────────────
+mongoAtlas [icon: mongodb, label: "MongoDB Atlas\n(per-service DBs)", colorMode: pastel]
+firebase [icon: firebase, label: "Firebase\n(image storage)"]
+stripe [icon: stripe, label: "Stripe\n(payments + webhooks)"]
+twilio [icon: twilio, label: "Twilio\n(SMS)"]
+resend [icon: mail, label: "Resend\n(email)"]
+agora [icon: video, label: "Agora\n(video calls)"]
+googleAI [icon: google-cloud, label: "Google Gemini\n(AI / symptom analysis)"]
+
+// ── AWS Region: us-east-1 ─────────────────────────────────────────────────────
+aws [icon: aws, label: "AWS — us-east-1"] {
+
+  cloudFront [icon: aws-cloudfront, label: "CloudFront\n*.cloudfront.net\nFree TLS · HTTPS edge"]
+
+  vpc [icon: aws-vpc, label: "VPC  10.0.0.0/16"] {
+
+
+    publicSubnets [label: "Public Subnets  (us-east-1a · us-east-1b)"] {
+      alb [icon: aws-elastic-load-balancing, label: "Application Load Balancer\n(created by LBC from Ingress)"]
+      natGW [icon: aws-nat-gateway, label: "NAT Gateway\n+ Elastic IP\n(single)"]
+    }
+
+    privateSubnets [label: "Private Subnets  (us-east-1a · us-east-1b)"] {
+
+      eks [icon: aws-eks, label: "EKS Cluster  distributed-health\nKubernetes   ·  3  nodes"] {
+
+        kubeSys [label: "kube-system"] {
+          lbc [icon: aws-elastic-load-balancing, label: "AWS Load Balancer Controller"]
+        }
+
+        argoNS [label: "argocd"] {
+          argoCD [icon: argo, label: "ArgoCD\n(GitOps · selfHeal · prune)"]
+        }
+
+        appNS [label: "distributed-health"] {
+          ingress [icon: k8s-ing, label: "Ingress\n(ingressClassName: alb)"]
+          keycloak [icon: lock, label: "Keycloak"]
+          "api-gateway (custom)" [icon: k8s-pod]
+          patientSvc [icon: k8s-pod, label: "patient-service"]
+          doctorSvc [icon: k8s-pod, label: "doctor-service"]
+          appointmentSvc [icon: k8s-pod, label: "appointment-service"]
+          paymentSvc [icon: k8s-pod, label: "payment-service"]
+          telemedicineSvc [icon: k8s-pod, label: "telemedicine-service"]
+          notificationSvc [icon: k8s-pod, label: "notification-service"]
+          aiSvc [icon: k8s-pod, label: "ai-service"]
+        }
+
+      }
+    }
+  }
+}
+GitHub Service repos [icon: github]
+
+// ── Main traffic path: User → CloudFront → ALB → cluster ─────────────────────
+Nextjs Frontend on Vercel > cloudFront: "HTTPS"
+cloudFront > alb: "HTTP  (AWS internal network\nTLS terminated at edge)"
+alb > ingress
+ingress > "api-gateway (custom)"
+
+// ── LBC watches the Ingress resource and provisions the ALB ──────────────────
+lbc --> alb: "creates + manages"
+lbc --> ingress: "watches"
+
+// ── API Gateway fans out to all downstream services (ClusterIP DNS) ───────────
+"api-gateway (custom)" > keycloak: "JWKS validation"
+"api-gateway (custom)" > patientSvc
+"api-gateway (custom)" > doctorSvc
+"api-gateway (custom)" > appointmentSvc
+"api-gateway (custom)" > paymentSvc
+"api-gateway (custom)" > telemedicineSvc
+"api-gateway (custom)" > notificationSvc
+"api-gateway (custom)" > aiSvc
+
+// ── GitOps loop ───────────────────────────────────────────────────────────────
+devTeam > "GitHub Service repos": git push or merge PR to main [textSize: small]
+"GitHub Service repos" > dockerHub: "CI: build + push"
+"GitHub Service repos" --> github: "SHA bump"
+argoCD > github: watches main for changes
+argoCD > appNS: "applies manifests"
+
+// ── Image pull: kubelet on EKS nodes pulls SHA-pinned images ─────────────────
+eks --> dockerHub: "image pull\n(kubelet, IfNotPresent)"
+
+// ── Outbound egress: private nodes → NAT → external SaaS ─────────────────────
+appNS > natGW: "outbound egress\n(all services)"
+natGW > mongoAtlas: "mongodb+srv://  (all 9 services\neach owns its own DB)"
+natGW > firebase: "doctor-service + patient-service\n(image upload / download)"
+natGW > stripe: "payment-service  (charge API)"
+natGW > twilio: "notification-service  (SMS)"
+natGW > resend: "notification-service  (email)"
+natGW > agora: "telemedicine-service  (video token gen)"
+natGW > googleAI: "ai-service  (Gemini — symptom analysis)"
+
+// ── Stripe webhook: reverse path back into cluster ────────────────────────────
+stripe --> cloudFront: "POST /payments/webhook(payment event callback)"

@@ -26,7 +26,7 @@ infrastructure/
 │   ├── kustomization.yaml      #   root entry point — references namespace + all 9 services
 │   ├── namespaces/             #   the `distributed-health` namespace
 │   ├── api-gateway/            #   each service: configmap, deployment, service, kustomization
-│   │   └── ingress.yaml        #   the platform's single ALB ingress (see note below)
+│   ├── ingress/                #   the platform's single ALB ingress (root-level)
 │   ├── authentication/         #   Keycloak (deployment named `keycloak`, secret `keycloak-secrets`)
 │   ├── patient-service/        #   + firebase-service-account.json (gitignored)
 │   ├── doctor-service/         #   + firebase-service-account.json (gitignored)
@@ -64,8 +64,7 @@ Secret handling is documented in [`SECRETS_MANAGEMENT.md`](SECRETS_MANAGEMENT.md
   node group of 3× `t3.small`, single NAT gateway, Kubernetes 1.32).
 - **Ingress:** a single internet-facing **ALB** created by the AWS Load Balancer Controller.
   It routes all traffic (`/`) to the `api-gateway` Service on port 3001. The Ingress
-  manifest currently lives in `k8s/api-gateway/ingress.yaml` (a known deviation — by
-  convention it belongs at `k8s/ingress/`; cosmetic, doesn't affect function).
+  manifest lives at `k8s/ingress/ingress.yaml` (root-level, per repo convention).
 - **GitOps:** ArgoCD watches this repo's `main` branch and syncs the `k8s/` manifests
   (self-heal + prune enabled). You normally do **not** `kubectl apply` by hand on EKS.
 - **Images:** all services pull public images from Docker Hub (`amzalfoumi/*`); each service's

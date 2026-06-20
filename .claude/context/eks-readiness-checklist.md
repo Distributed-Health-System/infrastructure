@@ -12,35 +12,6 @@ Last full audit: 2026-06-17.
 
 ## 🔴 Blockers — fix before `terraform apply` / first sync
 
-### B1. Ingress still uses nginx, not ALB
-`k8s/api-gateway/ingress.yaml` has `ingressClassName: nginx` plus `nginx.ingress.kubernetes.io/*`
-CORS annotations. The AWS Load Balancer Controller **ignores** nginx ingresses, so
-**no ALB is created and the platform has no external entrypoint**.
-
-Fix — replace class + annotations:
-```yaml
-metadata:
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
-spec:
-  ingressClassName: alb
-```
-The nginx CORS annotations do nothing on ALB (ALB has no CORS feature). CORS is already
-handled inside the api-gateway app, so dropping them is safe.
-
-**Status: DONE on `dev`** (ingress converted to ALB). Verified the gateway sets CORS
-itself at `api-gateway/src/main.ts:20`:
-`app.enableCors({ origin: 'http://localhost:3000', credentials: true })`.
-
-> **REMAINING ISSUE (B1 follow-up):** that allowed origin is **hardcoded to
-> `http://localhost:3000`**. Once the frontend is served from a real origin (the ALB DNS,
-> or the Vercel domain), browser requests will be **CORS-blocked** until `main.ts` is
-> updated — ideally to read the allowed origin(s) from an env var (e.g. `CORS_ORIGIN`)
-> wired through the api-gateway ConfigMap, rather than a hardcoded string. This lives in
-> the api-gateway service repo, not infra, so it must be changed and redeployed there.
-
 ### B2. `firebase-key-secret` is never created
 `doctor-service` and `patient-service` mount a volume from secret `firebase-key-secret`
 (see deployment `volumes:` → `secretName: firebase-key-secret`, mounted at
@@ -59,14 +30,14 @@ so one secret serves both. Just run `bash setup-secrets.sh` after `update-kubeco
   (`git push origin main`).
 - `argocd/application.yaml` uses `targetRevision: HEAD` → ArgoCD syncs the repo's
   **default branch** (main).
-- Your local infra checkout is on **`dev`**, where the B1/B2 fixes will land.
+- Your local infra checkout is on **`dev`**, where the B2 fix will land.
 
 So manual fixes made on `dev` will **not deploy** unless merged to `main`, and CI keeps
 moving `main` forward independently.
 
 > **DECISION (2026-06-17):** Infra lives on **`main`** — `main` is the source of truth that
 > ArgoCD (`targetRevision: HEAD`) and all CI workflows (`git push origin main`) use. Current
-> work on `dev` will be **merged into `main` later**. Until that merge lands, the B1/B2 fixes
+> work on `dev` will be **merged into `main` later**. Until that merge lands, the B2 fix
 > and any other change on `dev` will NOT be deployed by ArgoCD. No `targetRevision` or
 > workflow changes are needed — just remember to merge `dev` → `main` before relying on sync.
 
@@ -108,10 +79,22 @@ and the realm clients' redirect URIs updated, or login redirects break. Pure
 server-to-server JWKS validation (gateway → `http://keycloak:8080`) is fine as-is.
 
 ### R3. ALB is HTTP-only and its DNS changes every apply
-Ingress defines only HTTP:80, no ACM/TLS. The ALB DNS name is newly generated on every
-`apply`. Consequences: **Stripe webhooks** (payment-service) need a stable public HTTPS
-URL and must be re-pointed each demo; secure cookies / some browser APIs need HTTPS. For
-real payments add an ACM cert (`alb.ingress.kubernetes.io/certificate-arn`) + Route53.
+~~Ingress defines only HTTP:80, no ACM/TLS. The ALB DNS name is newly generated on every `apply`.~~
+
+**MITIGATED (2026-06-19) — CloudFront added (`terraform/cloudfront.tf`).**
+
+CloudFront now sits in front of the ALB and provides:
+- **HTTPS** via the free `*.cloudfront.net` managed certificate — no domain required
+- **A stable URL** (`https://xxxxx.cloudfront.net`) that does not change between applies **within the same provisioning cycle**
+
+> **URL stability caveat:** `terraform destroy` deletes the CloudFront distribution, so a full destroy → apply cycle produces a new CloudFront URL. After each such cycle, update: (1) Stripe webhook endpoint, (2) `NEXT_PUBLIC_API_URL` in Vercel env settings. `CORS_ORIGIN` in the configmap only needs updating if your Vercel project URL changes (rare).
+
+The ALB itself stays HTTP:80 and internal — users never hit it directly. The Ingress manifest is unchanged.
+
+Remaining considerations:
+- **Stripe webhooks** must be pointed at the CloudFront URL (not the ALB DNS). Update the Stripe dashboard webhook endpoint to `https://xxxxx.cloudfront.net/payments/webhook` after Phase 2 apply.
+- **CORS origin in api-gateway** — `src/main.ts` now reads `CORS_ORIGIN` env var (done 2026-06-19). Before Phase 2 deploy, update `k8s/api-gateway/configmap.yaml` `CORS_ORIGIN` value to `"https://your-app.vercel.app,http://localhost:3000"` and redeploy the gateway. (CORS origin = where the frontend HTML is served from, i.e. Vercel — not the CloudFront URL, which is the API destination.)
+- CloudFront distribution takes **5–15 minutes to propagate** after apply before it responds at the edge. The ALB DNS (HTTP) is still reachable directly during that window if needed for smoke testing.
 
 ---
 
@@ -126,8 +109,8 @@ real payments add an ACM cert (`alb.ingress.kubernetes.io/certificate-arn`) + Ro
 - **Images are public on Docker Hub** (`amzalfoumi/*`) → no `imagePullSecrets` needed. See
   `image-registry.md`. Watch Docker Hub anonymous pull limits (100 / 6h / IP) aggregated
   behind the single NAT IP — low risk for one demo.
-- **Ingress placement** still violates the infra repo rule (should live at
-  `k8s/ingress/`, not inside `api-gateway/`). Cosmetic; doesn't affect function.
+- **Ingress placement** now follows the infra repo rule — it lives at root-level
+  `k8s/ingress/` (with its own `kustomization.yaml`), referenced from the root kustomization.
 - **Secrets are gitignored** (`**/*.env.secret`, `firebase-service-account.json`,
   `setup-secrets.sh`); `git status` clean. No real secrets tracked. Good.
 - **Grafana/Prometheus use NodePort** (30030/30090) — not reachable through the ALB and
@@ -164,8 +147,7 @@ Problems / inconsistencies:
 4. **`argocd/.env.secret`** stores the ArgoCD admin password in plaintext (gitignored,
    local only) — acceptable, just don't commit it.
 
-The `SECRETS_MANAGEMENT.md` doc is accurate but mintions only minikube and omits the
-firebase file-secret step — update it alongside the script.
+The `SECRETS_MANAGEMENT.md` doc is accurate and now documents the firebase file-secret step.
 
 ---
 
@@ -234,6 +216,7 @@ Issues / blockers:
 ## Corrected run order
 
 ```bash
+# ── Phase 1: provision cluster ────────────────────────────────────────────────
 cd infrastructure/terraform
 terraform init
 terraform apply                                   # ~15 min: VPC + EKS + LBC
@@ -243,17 +226,27 @@ kubectl get nodes                                 # confirm Ready (same IAM iden
 
 # Add the NAT EIP to Atlas Network Access (B4)
 
-bash ../setup-secrets.sh                           # AFTER adding the firebase-key-secret step (B2)
+bash ../setup-secrets.sh                          # AFTER adding the firebase-key-secret step (B2)
 
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-kubectl apply -f ../argocd/application.yaml         # ensure targetRevision == the branch CI pushes (B3)
+kubectl apply -f ../argocd/application.yaml       # ensure targetRevision == the branch CI pushes (B3)
 # Optional, capacity permitting: kubectl apply -f ../argocd/monitoring.yaml   (R1)
 
-kubectl get ingress -n distributed-health          # grab ALB DNS once provisioned (needs B1 fixed)
-# Update Stripe webhook URL to the ALB DNS (R3)
+# Wait until ArgoCD syncs and the LBC creates the ALB
+kubectl get ingress -n distributed-health         # wait until ADDRESS column is populated
 
-# --- demo ---
+# ── Phase 2: wire up CloudFront (R3 mitigation) ──────────────────────────────
+terraform apply -var enable_cloudfront=true       # only creates CloudFront distribution
+terraform output cloudfront_url                   # → https://xxxxx.cloudfront.net
 
-terraform destroy                                  # ALB cleanup runs automatically → $0
+# Update Stripe webhook endpoint in Stripe dashboard to the CloudFront URL (R3)
+# Update CORS_ORIGIN in k8s/api-gateway/configmap.yaml to your Vercel URL, commit to main, ArgoCD reconciles (R3 follow-up)
+
+# Wait ~5-15 min for CloudFront edge propagation, then smoke test:
+curl -I $(terraform output -raw cloudfront_url)
+
+# ── demo runs here ────────────────────────────────────────────────────────────
+
+terraform destroy                                 # ALB cleanup + CloudFront removal → $0
 ```

@@ -5,6 +5,10 @@ metadata:
   namespace: distributed-health
 data:
   PORT: "3001"
+  # Comma-separated list of allowed CORS origins (where the frontend HTML is served FROM).
+  # The Origin header is set by the browser to the frontend's host, not the API's host.
+  # After deploying the frontend: set to "https://your-app.vercel.app,http://localhost:3000"
+  CORS_ORIGIN: "http://localhost:3000"
   AUTHENTICATION_SERVICE_URL: "http://keycloak:8080"
   KEYCLOAK_URL: "http://keycloak:8080"
   KEYCLOAK_REALM: "health-system"

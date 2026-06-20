@@ -39,3 +39,15 @@ variable "node_max_count" {
   type        = number
   default     = 3
 }
+
+variable "enable_cloudfront" {
+  description = <<-EOT
+    Whether to build the CloudFront distribution (cloudfront.tf).
+    Keep FALSE for Phase 1 (cluster provisioning) — the ALB does not exist yet,
+    and the aws_lb data lookup would fail at plan time.
+    Set TRUE for Phase 2, AFTER ArgoCD has created the Ingress and the LBC has
+    provisioned the ALB:  terraform apply -var enable_cloudfront=true
+  EOT
+  type        = bool
+  default     = false
+}

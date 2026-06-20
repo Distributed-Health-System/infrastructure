@@ -10,23 +10,28 @@ This document covers the Terraform workflow, required components, and AWS-specif
 
 The intended usage pattern is: **provision before demo → destroy after demo → cost goes to zero**.
 
+CloudFront requires a **two-phase apply** because the ALB doesn't exist until after ArgoCD syncs the Ingress. Phase 1 builds the cluster; Phase 2 builds CloudFront on top of it.
+
 ```
+# Phase 1 — provision cluster + LBC (~15 min)
 terraform init      # one-time: download providers and modules
 terraform plan      # preview what will be created/changed
-terraform apply     # provision all AWS resources (~15 min)
+terraform apply
+
+# Wire kubectl and let ArgoCD deploy the app
+aws eks update-kubeconfig --name distributed-health --region us-east-1
+kubectl get ingress -n distributed-health   # wait until ADDRESS column is populated
+
+# Phase 2 — build CloudFront now that the ALB exists
+terraform apply -var enable_cloudfront=true   # only creates the CloudFront distribution
+terraform output cloudfront_url             # your https://xxxxx.cloudfront.net entry point
 
 # --- demo runs here ---
 
 terraform destroy   # tear down everything, cost → $0
 ```
 
-After `apply`, wire up kubectl:
-```bash
-aws eks update-kubeconfig --name distributed-health --region us-east-1
-kubectl get nodes   # verify cluster is up
-```
-
-ArgoCD then syncs the k8s manifests from `argocd/application.yaml` automatically.
+ArgoCD syncs the k8s manifests from `argocd/application.yaml` automatically after Phase 1.
 
 ---
 
@@ -39,7 +44,8 @@ terraform/
 ├── variables.tf    # all configurable inputs (region, cluster name, node count, instance type)
 ├── main.tf         # VPC + EKS cluster + destroy-time ALB cleanup hook
 ├── helm.tf         # AWS Load Balancer Controller — IAM policy, IRSA role, Helm install
-└── outputs.tf      # values printed after apply (cluster name, endpoint, kubeconfig command)
+├── cloudfront.tf   # CloudFront distribution — free HTTPS + CDN in front of the ALB
+└── outputs.tf      # values printed after apply (cluster name, endpoint, cloudfront_url, …)
 ```
 
 ### `variables.tf`
@@ -66,6 +72,7 @@ Prints after `terraform apply`:
 - `kubeconfig_command` — the exact command to run, ready to copy-paste
 - `vpc_id` — needed if troubleshooting ALB or security groups
 - `oidc_provider_arn` — needed if you add IRSA for other services later
+- `cloudfront_url` — the public HTTPS entry point (`https://xxxxx.cloudfront.net`); only populated after Phase 2 apply
 
 ---
 
@@ -233,7 +240,7 @@ module "eks" {
 
 ## Component 3: AWS Load Balancer Controller
 
-**Replaces:** `ingressClassName: nginx` in `k8s/api-gateway/ingress.yaml`
+**Replaces:** `ingressClassName: nginx` in `k8s/ingress/ingress.yaml`
 **Controller version:** v2.14.1 | **Helm chart version:** 1.14.0
 
 The LBC watches Ingress resources and creates AWS Application Load Balancers automatically.
@@ -300,9 +307,63 @@ kubectl get deployment -n kube-system aws-load-balancer-controller
 
 ---
 
+## Component 4: CloudFront — `cloudfront.tf`
+
+**Added:** 2026-06-19
+
+CloudFront sits in front of the ALB and provides:
+- **Free HTTPS** via the `*.cloudfront.net` managed certificate — no domain, no ACM cert needed
+- **A stable URL** that doesn't change between `terraform apply` cycles (unlike the ALB DNS)
+- **Global edge caching** (currently pass-through / caching disabled — see Future Work note below)
+
+### Why it's needed
+
+We don't own a domain name. Getting a public TLS certificate directly on the ALB requires ACM, which requires proving you own a domain. CloudFront sidesteps this entirely — every distribution gets `https://<id>.cloudfront.net` with an AWS-managed cert pre-attached.
+
+### Traffic flow
+
+```
+User --HTTPS--> CloudFront (free *.cloudfront.net cert)
+                  --HTTP--> ALB (internal, unchanged)
+                              --> Ingress --> api-gateway --> microservices
+```
+
+TLS terminates at CloudFront. The CloudFront → ALB hop stays HTTP because the ALB has no cert (no domain). That hop travels inside AWS's private backbone — not the public internet.
+
+### How it finds the ALB
+
+The ALB is created dynamically by the LBC (not by Terraform directly), so its hostname isn't known at write time. `cloudfront.tf` uses a `data "aws_lb"` lookup that finds it by the tags the LBC stamps:
+
+```hcl
+data "aws_lb" "ingress_alb" {
+  tags = {
+    "elbv2.k8s.aws/cluster" = var.cluster_name
+    "ingress.k8s.aws/stack" = "distributed-health/api-gateway-ingress"
+  }
+}
+```
+
+This is why a two-phase apply is required — the ALB must exist before this lookup can succeed. The lookup (and the distribution) are gated behind `var.enable_cloudfront` (default `false`), with `count = var.enable_cloudfront ? 1 : 0`. **This gate is mandatory:** a data source is read at *plan* time and `aws_lb` errors if it matches zero load balancers — so without the flag, Phase 1 itself would fail at plan. Phase 2 runs `terraform apply -var enable_cloudfront=true`.
+
+### Authorization header forwarding (critical)
+
+CloudFront strips the `Authorization` header by default. This would silently break every JWT-authenticated request with a 401. The distribution uses the AWS-managed **AllViewer** origin request policy, which forwards all headers including `Authorization`.
+
+### Current design: pass-through only
+
+The distribution has a single catch-all behavior with `Managed-CachingDisabled`. Every request hits the ALB — nothing is cached. This is correct for a dynamic API gateway.
+
+**Future work:** add an `ordered_cache_behavior` block matching static asset paths (e.g. `/_next/static/*`) with `Managed-CachingOptimized` to actually use the CDN for frontend static assets. Document in `cloudfront.tf` already.
+
+### Destruction
+
+`terraform destroy` removes the CloudFront distribution automatically. No manual steps needed. The ALB cleanup hook in `main.tf` still runs first (deletes Ingress → LBC removes ALB → VPC can be deleted cleanly).
+
+---
+
 ## Ingress Change — DONE (2026-06-17)
 
-`k8s/api-gateway/ingress.yaml` has been converted from nginx to ALB. It now uses:
+`k8s/ingress/ingress.yaml` has been converted from nginx to ALB. It now uses:
 
 ```yaml
 metadata:
@@ -379,7 +440,7 @@ us-east-1 has the lowest prices of any AWS region. These are pay-per-use — the
 ## Quick Reference Commands
 
 ```bash
-# Provision (runs everything including LBC install)
+# Phase 1 — provision cluster + LBC
 cd terraform && terraform init && terraform apply
 
 # Wire kubectl (command also printed by terraform output)
@@ -396,6 +457,16 @@ kubectl apply -f argocd/application.yaml
 # Verify LBC is running
 kubectl get deployment -n kube-system aws-load-balancer-controller
 
-# Destroy everything (ALB cleanup runs automatically)
+# Wait until the ALB is provisioned (ADDRESS column populated)
+kubectl get ingress -n distributed-health
+
+# Phase 2 — build CloudFront on top of the now-existing ALB
+cd terraform && terraform apply -var enable_cloudfront=true
+terraform output cloudfront_url   # → https://xxxxx.cloudfront.net (live in ~5-15 min)
+
+# Quick smoke test (before opening in browser)
+curl -I $(terraform output -raw cloudfront_url)
+
+# Destroy everything (ALB cleanup + CloudFront removal run automatically)
 cd terraform && terraform destroy
 ```

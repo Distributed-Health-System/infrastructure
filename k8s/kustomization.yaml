@@ -4,6 +4,7 @@ resources:
   - namespaces/namespace.yaml
   - authentication
   - api-gateway
+  - ingress
   - notification-service
   - patient-service
   - doctor-service

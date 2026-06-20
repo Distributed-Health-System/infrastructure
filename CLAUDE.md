@@ -30,7 +30,8 @@ k8s/
 │   ├── configmap.yaml
 │   ├── deployment.yaml
 │   └── service.yaml
-└── ingress/                    ← add later
+└── ingress/                    ← root-level ALB ingress
+    ├── kustomization.yaml
     └── ingress.yaml
 ```
 
@@ -212,8 +213,8 @@ Add each new service as a sibling folder under `k8s/` following the same structu
    Do not commit the nginx variant as the default — `alb` is the committed default.
 3. ALB has **no CORS feature** — CORS must be handled in the api-gateway app, not via ingress
    annotations.
-4. Ingress *should* live at `k8s/ingress/ingress.yaml` (root-level), referenced from the root
-   `k8s/kustomization.yaml`. **Known deviation:** it currently lives in `k8s/api-gateway/`.
+4. Ingress lives at `k8s/ingress/ingress.yaml` (root-level), with its own
+   `k8s/ingress/kustomization.yaml` referenced from the root `k8s/kustomization.yaml`.
 5. All services behind the ingress must be `ClusterIP` type.
 
 ---
