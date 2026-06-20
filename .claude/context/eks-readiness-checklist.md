@@ -12,34 +12,6 @@ Last full audit: 2026-06-17.
 
 ## 🔴 Blockers — fix before `terraform apply` / first sync
 
-### B1. Ingress still uses nginx, not ALB
-`k8s/api-gateway/ingress.yaml` has `ingressClassName: nginx` plus `nginx.ingress.kubernetes.io/*`
-CORS annotations. The AWS Load Balancer Controller **ignores** nginx ingresses, so
-**no ALB is created and the platform has no external entrypoint**.
-
-Fix — replace class + annotations:
-```yaml
-metadata:
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
-spec:
-  ingressClassName: alb
-```
-The nginx CORS annotations do nothing on ALB (ALB has no CORS feature). CORS is already
-handled inside the api-gateway app, so dropping them is safe.
-
-**Status: DONE on `dev`** (ingress converted to ALB). Verified the gateway sets CORS
-itself at `api-gateway/src/main.ts:20`:
-`app.enableCors({ origin: 'http://localhost:3000', credentials: true })`.
-
-> **DONE (2026-06-19):** `api-gateway/src/main.ts` now reads `CORS_ORIGIN` from the
-> environment (comma-separated list, falls back to `http://localhost:3000`). The
-> `k8s/api-gateway/configmap.yaml` exposes the variable — update its value to the
-> CloudFront URL + Vercel URL before deploying to EKS:
-> `CORS_ORIGIN: "https://xxxxx.cloudfront.net,https://your-app.vercel.app"`
-
 ### B2. `firebase-key-secret` is never created
 `doctor-service` and `patient-service` mount a volume from secret `firebase-key-secret`
 (see deployment `volumes:` → `secretName: firebase-key-secret`, mounted at
@@ -58,14 +30,14 @@ so one secret serves both. Just run `bash setup-secrets.sh` after `update-kubeco
   (`git push origin main`).
 - `argocd/application.yaml` uses `targetRevision: HEAD` → ArgoCD syncs the repo's
   **default branch** (main).
-- Your local infra checkout is on **`dev`**, where the B1/B2 fixes will land.
+- Your local infra checkout is on **`dev`**, where the B2 fix will land.
 
 So manual fixes made on `dev` will **not deploy** unless merged to `main`, and CI keeps
 moving `main` forward independently.
 
 > **DECISION (2026-06-17):** Infra lives on **`main`** — `main` is the source of truth that
 > ArgoCD (`targetRevision: HEAD`) and all CI workflows (`git push origin main`) use. Current
-> work on `dev` will be **merged into `main` later**. Until that merge lands, the B1/B2 fixes
+> work on `dev` will be **merged into `main` later**. Until that merge lands, the B2 fix
 > and any other change on `dev` will NOT be deployed by ArgoCD. No `targetRevision` or
 > workflow changes are needed — just remember to merge `dev` → `main` before relying on sync.
 
@@ -113,7 +85,9 @@ server-to-server JWKS validation (gateway → `http://keycloak:8080`) is fine as
 
 CloudFront now sits in front of the ALB and provides:
 - **HTTPS** via the free `*.cloudfront.net` managed certificate — no domain required
-- **A stable URL** (`https://xxxxx.cloudfront.net`) that does not change between applies
+- **A stable URL** (`https://xxxxx.cloudfront.net`) that does not change between applies **within the same provisioning cycle**
+
+> **URL stability caveat:** `terraform destroy` deletes the CloudFront distribution, so a full destroy → apply cycle produces a new CloudFront URL. After each such cycle, update: (1) Stripe webhook endpoint, (2) `NEXT_PUBLIC_API_URL` in Vercel env settings. `CORS_ORIGIN` in the configmap only needs updating if your Vercel project URL changes (rare).
 
 The ALB itself stays HTTP:80 and internal — users never hit it directly. The Ingress manifest is unchanged.
 
@@ -135,8 +109,8 @@ Remaining considerations:
 - **Images are public on Docker Hub** (`amzalfoumi/*`) → no `imagePullSecrets` needed. See
   `image-registry.md`. Watch Docker Hub anonymous pull limits (100 / 6h / IP) aggregated
   behind the single NAT IP — low risk for one demo.
-- **Ingress placement** still violates the infra repo rule (should live at
-  `k8s/ingress/`, not inside `api-gateway/`). Cosmetic; doesn't affect function.
+- **Ingress placement** now follows the infra repo rule — it lives at root-level
+  `k8s/ingress/` (with its own `kustomization.yaml`), referenced from the root kustomization.
 - **Secrets are gitignored** (`**/*.env.secret`, `firebase-service-account.json`,
   `setup-secrets.sh`); `git status` clean. No real secrets tracked. Good.
 - **Grafana/Prometheus use NodePort** (30030/30090) — not reachable through the ALB and
@@ -173,8 +147,7 @@ Problems / inconsistencies:
 4. **`argocd/.env.secret`** stores the ArgoCD admin password in plaintext (gitignored,
    local only) — acceptable, just don't commit it.
 
-The `SECRETS_MANAGEMENT.md` doc is accurate but mintions only minikube and omits the
-firebase file-secret step — update it alongside the script.
+The `SECRETS_MANAGEMENT.md` doc is accurate and now documents the firebase file-secret step.
 
 ---
 
@@ -268,7 +241,7 @@ terraform apply -var enable_cloudfront=true       # only creates CloudFront dist
 terraform output cloudfront_url                   # → https://xxxxx.cloudfront.net
 
 # Update Stripe webhook endpoint in Stripe dashboard to the CloudFront URL (R3)
-# Update CORS allowed origin in api-gateway src/main.ts to the CloudFront URL (B1 follow-up)
+# Update CORS_ORIGIN in k8s/api-gateway/configmap.yaml to your Vercel URL, commit to main, ArgoCD reconciles (R3 follow-up)
 
 # Wait ~5-15 min for CloudFront edge propagation, then smoke test:
 curl -I $(terraform output -raw cloudfront_url)

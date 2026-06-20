@@ -4,7 +4,7 @@ As a universal security best practice, we **never commit secrets** (like databas
 
 Because we use **ArgoCD for GitOps**, ArgoCD synchronizes our Kubernetes state directly from this remote GitHub repository. It does not have access to the uncommitted local `.env.secret` files on your machine. Therefore, if we tried to use Kustomize's `secretGenerator` to build secrets, ArgoCD would fail because the required `.env.secret` files aren't available to it in the Git repository.
 
-To solve this, secrets are created **imperatively (manually)** directly inside the Minikube cluster using our local `.env.secret` files.
+To solve this, secrets are created **imperatively (manually)** directly inside the target cluster (EKS in production, minikube for local dev) using our local `.env.secret` files.
 
 How to Inject or Update a Secret
 

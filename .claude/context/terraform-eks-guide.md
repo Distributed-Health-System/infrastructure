@@ -240,7 +240,7 @@ module "eks" {
 
 ## Component 3: AWS Load Balancer Controller
 
-**Replaces:** `ingressClassName: nginx` in `k8s/api-gateway/ingress.yaml`
+**Replaces:** `ingressClassName: nginx` in `k8s/ingress/ingress.yaml`
 **Controller version:** v2.14.1 | **Helm chart version:** 1.14.0
 
 The LBC watches Ingress resources and creates AWS Application Load Balancers automatically.
@@ -363,7 +363,7 @@ The distribution has a single catch-all behavior with `Managed-CachingDisabled`.
 
 ## Ingress Change — DONE (2026-06-17)
 
-`k8s/api-gateway/ingress.yaml` has been converted from nginx to ALB. It now uses:
+`k8s/ingress/ingress.yaml` has been converted from nginx to ALB. It now uses:
 
 ```yaml
 metadata:
