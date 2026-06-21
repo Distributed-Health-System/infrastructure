@@ -39,3 +39,5 @@ terraform/override.tf
 terraform/override.tf.json
 terraform/*tfplan*
 
+#blog related docs
+docs/
