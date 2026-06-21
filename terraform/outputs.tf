@@ -14,12 +14,12 @@ output "kubeconfig_command" {
 }
 
 output "vpc_id" {
-  description = "VPC ID — needed when installing LBC via helm if not using helm.tf"
+  description = "VPC ID — useful for manual LBC installs or other VPC-scoped resources"
   value       = module.vpc.vpc_id
 }
 
 output "oidc_provider_arn" {
-  description = "OIDC provider ARN — used for IRSA (IAM Roles for Service Accounts)"
+  description = "OIDC provider ARN — used for IRSA (IAM Roles for Service Accounts), e.g. the LBC role in lbc.tf"
   value       = module.eks.oidc_provider_arn
 }
 

@@ -41,10 +41,10 @@ All files live under `infrastructure/terraform/`.
 
 ```
 terraform/
-├── providers.tf    # terraform block + AWS, Kubernetes, and Helm provider configs
+├── providers.tf    # terraform block + AWS provider (only provider needed)
 ├── variables.tf    # all configurable inputs (region, cluster name, node count, instance type)
 ├── main.tf         # VPC + EKS cluster + destroy-time ALB cleanup hook
-├── helm.tf         # AWS Load Balancer Controller — IAM policy, IRSA role, Helm install
+├── lbc.tf          # AWS Load Balancer Controller — IRSA role + EKS managed add-on
 ├── cloudfront.tf   # CloudFront distribution — free HTTPS + CDN in front of the ALB
 └── outputs.tf      # values printed after apply (cluster name, endpoint, cloudfront_url, …)
 ```
@@ -53,20 +53,22 @@ terraform/
 Single source of truth for all configurable values. Every other file references `var.*` — nothing is hardcoded elsewhere. Key variables: `aws_region`, `cluster_name`, `kubernetes_version`, `node_instance_type`, `node_desired_count`.
 
 ### `providers.tf`
-Configures the `terraform {}` block (required providers + version constraints) and the AWS, Kubernetes, and Helm providers. The Kubernetes and Helm providers authenticate using `aws eks get-token` at runtime, so they only resolve after the EKS cluster exists.
+Configures the `terraform {}` block (required providers + version constraints) and the AWS provider. The AWS provider is the **only** provider needed: the Load Balancer Controller is installed as an EKS managed add-on (`aws_eks_addon`), and the destroy hook shells out to `kubectl` via `local-exec`, so no `kubernetes` or `helm` providers are required.
+
+> **Alternative (older approach):** the controller used to be installed via the Helm chart (`helm_release`), which required three more providers — `kubernetes` and `helm` (both authenticating with `aws eks get-token`, so they only resolved after the cluster existed) plus `http` (to fetch the IAM policy JSON). That version is kept commented at the bottom of `lbc.tf` for reference.
 
 ### `main.tf`
 Contains three logical sections:
 - **VPC module** — creates the network: private subnets (nodes), public subnets (load balancers), one NAT Gateway so nodes can pull images.
 - **EKS module** — creates the control plane and managed node group (3× t3.small).
-- **`terraform_data.cleanup_alb_before_destroy`** — a destroy-time hook that deletes Ingress objects so the LBC removes the ALB before Terraform tries to delete the VPC. Without this, the VPC destroy fails because the ALB still holds subnet references.
+- **`terraform_data.cleanup_alb_before_destroy`** — a destroy-time hook that deletes Ingress objects so the LBC removes the ALB before Terraform tries to delete the VPC. Without this, the VPC destroy fails because the ALB still holds subnet references. (Its `depends_on` points at `aws_eks_addon.lbc` so the controller is still running when the hook fires.)
 
-### `helm.tf`
-Installs the AWS Load Balancer Controller entirely via Terraform — no manual commands needed:
-1. Fetches the official IAM policy JSON from the controller's GitHub repo (`data.http`)
-2. Creates the IAM policy in your AWS account (`aws_iam_policy`)
-3. Creates an IAM role bound to a Kubernetes service account via OIDC — IRSA (`module.lbc_irsa`)
-4. Installs the controller into `kube-system` via Helm (`helm_release.lbc`)
+### `lbc.tf`
+Installs the AWS Load Balancer Controller entirely via Terraform, using only the AWS provider — no manual commands needed:
+1. Creates an IAM role bound to the controller's Kubernetes service account via OIDC — IRSA (`module.lbc_irsa`). The module bundles the official LBC IAM policy (`attach_load_balancer_controller_policy`), so no separate policy fetch/create is needed.
+2. Installs the controller into `kube-system` as an EKS managed add-on (`aws_eks_addon.lbc`). AWS picks an add-on version compatible with the cluster's Kubernetes version; `configuration_values` annotates the service account with the IRSA role ARN.
+
+> **Trade-off vs. the older Helm install:** the add-on is simpler (one AWS resource, no extra providers) but gives less control over the exact controller version — you pick from AWS's published add-on versions rather than pinning an arbitrary chart version. The previous Helm approach (pinned controller `v2.14.1` / chart `1.14.0`, IAM policy fetched from GitHub via `data.http`, installed with `helm_release.lbc`) is kept commented at the bottom of `lbc.tf`.
 
 ### `outputs.tf`
 Prints after `terraform apply`:
@@ -88,7 +90,7 @@ Prints after `terraform apply`:
 `main.tf` contains a `terraform_data.cleanup_alb_before_destroy` resource with a destroy-time provisioner. Terraform's destroy order ensures this runs first:
 
 ```
-cleanup_alb_before_destroy  →  helm_release.lbc  →  module.eks  →  module.vpc
+cleanup_alb_before_destroy  →  aws_eks_addon.lbc  →  module.eks  →  module.vpc
 ```
 
 The provisioner:
@@ -234,23 +236,23 @@ module "eks" {
 ```
 
 **Key outputs:**
-- `module.eks.cluster_name` — used in Helm and kubeconfig
+- `module.eks.cluster_name` — used by the LBC add-on, the destroy hook, and kubeconfig
 - `module.eks.cluster_endpoint` — API server URL
-- `module.eks.oidc_provider_arn` — required for IRSA
-- `module.eks.cluster_certificate_authority_data` — for Kubernetes provider auth
+- `module.eks.oidc_provider_arn` — required for IRSA (the LBC role)
+- `module.eks.cluster_certificate_authority_data` — for kubeconfig / API auth
 
 ---
 
 ## Component 3: AWS Load Balancer Controller
 
 **Replaces:** `ingressClassName: nginx` in `k8s/ingress/ingress.yaml`
-**Controller version:** v2.14.1 | **Helm chart version:** 1.14.0
+**Install method:** EKS managed add-on (`aws_eks_addon`); AWS selects a version matching the cluster's Kubernetes version.
 
 The LBC watches Ingress resources and creates AWS Application Load Balancers automatically.
 
-### Primary: Automated via `helm.tf`
+### Primary: Automated via `lbc.tf`
 
-All three steps (IAM policy, IRSA role, Helm install) run automatically as part of `terraform apply`. No manual commands needed.
+Both steps (IRSA role, EKS managed add-on) run automatically as part of `terraform apply`, using only the AWS provider. No manual commands needed.
 
 Verify after apply:
 ```bash
@@ -258,9 +260,9 @@ kubectl get deployment -n kube-system aws-load-balancer-controller
 # Expected: READY 2/2
 ```
 
-### Fallback: Manual installation (if `helm_release.lbc` fails in Terraform)
+### Fallback: Manual installation (if the add-on fails in Terraform)
 
-If the Terraform Helm install fails (e.g., timeout, provider auth issue), you can install the LBC manually after the cluster is up. These steps are fully valid and produce the same result.
+If the managed add-on fails to install, you can install the LBC manually after the cluster is up via Helm. These steps are fully valid and produce the same result — they are also exactly the **older alternative approach** that the Terraform config used before moving to the add-on (kept commented in `lbc.tf`).
 
 **Step 1 — IAM Policy** (skip if the policy already exists from a partial apply)
 ```bash
