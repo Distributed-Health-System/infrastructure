@@ -41,6 +41,7 @@ All files live under `infrastructure/terraform/`.
 
 ```
 terraform/
+├── providers.tf    # terraform block + AWS, Kubernetes, and Helm provider configs
 ├── variables.tf    # all configurable inputs (region, cluster name, node count, instance type)
 ├── main.tf         # VPC + EKS cluster + destroy-time ALB cleanup hook
 ├── helm.tf         # AWS Load Balancer Controller — IAM policy, IRSA role, Helm install
@@ -51,9 +52,11 @@ terraform/
 ### `variables.tf`
 Single source of truth for all configurable values. Every other file references `var.*` — nothing is hardcoded elsewhere. Key variables: `aws_region`, `cluster_name`, `kubernetes_version`, `node_instance_type`, `node_desired_count`.
 
+### `providers.tf`
+Configures the `terraform {}` block (required providers + version constraints) and the AWS, Kubernetes, and Helm providers. The Kubernetes and Helm providers authenticate using `aws eks get-token` at runtime, so they only resolve after the EKS cluster exists.
+
 ### `main.tf`
 Contains three logical sections:
-- **Provider blocks** — configures the AWS, Kubernetes, and Helm providers. The Kubernetes and Helm providers authenticate using `aws eks get-token` at runtime, so they only resolve after the EKS cluster exists.
 - **VPC module** — creates the network: private subnets (nodes), public subnets (load balancers), one NAT Gateway so nodes can pull images.
 - **EKS module** — creates the control plane and managed node group (3× t3.small).
 - **`terraform_data.cleanup_alb_before_destroy`** — a destroy-time hook that deletes Ingress objects so the LBC removes the ALB before Terraform tries to delete the VPC. Without this, the VPC destroy fails because the ALB still holds subnet references.

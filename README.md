@@ -18,6 +18,7 @@ manifests here (see [CI/CD flow](#how-images-reach-the-cluster)).
 ```
 infrastructure/
 ├── terraform/                  # AWS EKS cluster (VPC, EKS, AWS Load Balancer Controller)
+│   ├── providers.tf            #   terraform block + AWS/Kubernetes/Helm provider configs
 │   ├── main.tf                 #   VPC + EKS module + destroy-time ALB cleanup hook
 │   ├── helm.tf                 #   AWS Load Balancer Controller (IAM policy, IRSA, Helm install)
 │   ├── variables.tf            #   region, cluster name, node count/type, k8s version
