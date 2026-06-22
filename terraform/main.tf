@@ -70,7 +70,7 @@ module "eks" {
 # the VPC destroy fails because the ALB still holds subnet/SG references.
 #
 # Dependency chain (destroy order):
-#   this resource → helm_release.lbc → module.eks → module.vpc
+#   this resource → aws_eks_addon.lbc → module.eks → module.vpc
 # ---------------------------------------------------------------------------
 
 resource "terraform_data" "cleanup_alb_before_destroy" {
@@ -111,5 +111,5 @@ resource "terraform_data" "cleanup_alb_before_destroy" {
     on_failure = continue
   }
 
-  depends_on = [helm_release.lbc]
+  depends_on = [aws_eks_addon.lbc]
 }

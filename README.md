@@ -18,9 +18,9 @@ manifests here (see [CI/CD flow](#how-images-reach-the-cluster)).
 ```
 infrastructure/
 ├── terraform/                  # AWS EKS cluster (VPC, EKS, AWS Load Balancer Controller)
-│   ├── providers.tf            #   terraform block + AWS/Kubernetes/Helm provider configs
+│   ├── providers.tf            #   terraform block + AWS provider (only provider needed)
 │   ├── main.tf                 #   VPC + EKS module + destroy-time ALB cleanup hook
-│   ├── helm.tf                 #   AWS Load Balancer Controller (IAM policy, IRSA, Helm install)
+│   ├── lbc.tf                  #   AWS Load Balancer Controller (IRSA role + EKS managed add-on)
 │   ├── variables.tf            #   region, cluster name, node count/type, k8s version
 │   └── outputs.tf              #   cluster name, endpoint, kubeconfig command, VPC/OIDC ids
 ├── k8s/                        # Kubernetes manifests, deployed by ArgoCD via Kustomize
@@ -117,8 +117,8 @@ terraform plan        # preview
 terraform apply        # VPC + EKS + AWS Load Balancer Controller (~15 min)
 ```
 
-`terraform apply` installs the AWS Load Balancer Controller automatically (IAM policy, IRSA
-role, and Helm release) — no manual steps. To override defaults, edit `terraform/variables.tf`
+`terraform apply` installs the AWS Load Balancer Controller automatically (IRSA role + EKS
+managed add-on) — no manual steps. To override defaults, edit `terraform/variables.tf`
 or pass `-var` flags (e.g. `-var node_instance_type=t3.medium`).
 
 ### 2. Wire up kubectl
