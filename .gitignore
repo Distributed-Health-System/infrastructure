@@ -41,3 +41,5 @@ terraform/*tfplan*
 
 #blog related docs
 docs/
+# Claude Code local assistant notes
+.claude/
